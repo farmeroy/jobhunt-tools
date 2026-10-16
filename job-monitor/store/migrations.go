@@ -3,7 +3,7 @@ package store
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS companies (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	name TEXT NOT NULL,
+	name TEXT NOT NULL UNIQUE,
 	slug TEXT NOT NULL DEFAULT '',
 	ats TEXT,
 	active INTEGER NOT NULL DEFAULT 1,

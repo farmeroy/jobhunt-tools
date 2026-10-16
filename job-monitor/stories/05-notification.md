@@ -7,7 +7,7 @@
 - [ ] Matched postings are sent as an email digest
 - [ ] Email includes: company name, job title, match score, reasoning summary, and direct apply link
 - [ ] Postings are grouped by company
-- [ ] Each posting is only notified once (tracked via `notified` flag in DB)
+- [ ] Each posting is only notified once (tracked via `notified_at` timestamp in DB)
 - [ ] If no new matches are found, no email is sent
 - [ ] Notification method is behind an interface for future extensibility (Slack, Discord, etc.)
 

@@ -85,8 +85,8 @@ SQLite is the single source of truth for both companies and postings. The existi
 - `title_relevant` — boolean (pass 1 result, nullable)
 - `content_score` — float (pass 2 result, nullable)
 - `content_reasoning` — text (pass 2 reasoning, nullable)
-- `notified` — boolean
-- `applied` — boolean (stretch: user marks this)
+- `notified_at` — timestamp (nullable, when the user was notified)
+- `applied_at` — timestamp (nullable, when the user marked as applied)
 
 Unique constraint on `(company_id, external_id)` for dedup.
 
