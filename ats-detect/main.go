@@ -3,123 +3,13 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
+
+	"jobhunt/tools/internal/atsutil"
 )
-
-type atsProvider struct {
-	Name    string
-	BaseURL string
-	// MinSize is the minimum response body size to consider a board "real".
-	// 0 means rely on HTTP status code only.
-	MinSize int64
-}
-
-var providers = []atsProvider{
-	{Name: "Greenhouse", BaseURL: "https://boards.greenhouse.io/", MinSize: 0},
-	{Name: "Lever", BaseURL: "https://jobs.lever.co/", MinSize: 0},
-	{Name: "Ashby", BaseURL: "https://jobs.ashbyhq.com/", MinSize: 15000},
-}
-
-var client = &http.Client{
-	Timeout: 8 * time.Second,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 {
-			return http.ErrUseLastResponse
-		}
-		return nil
-	},
-}
-
-func slugify(company string) []string {
-	lower := strings.ToLower(company)
-
-	// Strip non-alphanumeric except spaces and hyphens
-	clean := strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '-' {
-			return r
-		}
-		return -1
-	}, lower)
-
-	// Collapse whitespace
-	fields := strings.Fields(clean)
-	joined := strings.Join(fields, "")       // "airbnb"
-	dashed := strings.Join(fields, "-")       // "air-bnb" (only different for multi-word)
-
-	slugs := []string{joined}
-	if dashed != joined {
-		slugs = append(slugs, dashed)
-	}
-
-	// Try without common suffixes
-	for _, suffix := range []string{"ai", "io", "co", "inc", "health"} {
-		for _, s := range []string{joined, dashed} {
-			trimmed := strings.TrimSuffix(s, suffix)
-			trimmed = strings.TrimSuffix(trimmed, "-")
-			if trimmed != "" && trimmed != s {
-				slugs = append(slugs, trimmed)
-			}
-		}
-	}
-
-	// Deduplicate
-	seen := map[string]bool{}
-	var unique []string
-	for _, s := range slugs {
-		if !seen[s] {
-			seen[s] = true
-			unique = append(unique, s)
-		}
-	}
-	return unique
-}
-
-func checkProvider(provider atsProvider, slug string) bool {
-	url := provider.BaseURL + slug
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return false
-	}
-
-	if provider.MinSize > 0 {
-		// Read up to MinSize+1 to check if body exceeds threshold
-		buf := make([]byte, provider.MinSize+1)
-		n, _ := io.ReadFull(resp.Body, buf)
-		return int64(n) > provider.MinSize
-	}
-
-	return true
-}
-
-func detectATS(company string) string {
-	slugs := slugify(company)
-
-	for _, provider := range providers {
-		for _, slug := range slugs {
-			if checkProvider(provider, slug) {
-				return provider.Name
-			}
-		}
-	}
-	return ""
-}
 
 type row struct {
 	Company        string
@@ -148,7 +38,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Find column indices
 	colIdx := map[string]int{}
 	for i, h := range header {
 		colIdx[h] = i
@@ -168,7 +57,6 @@ func main() {
 	}
 	f.Close()
 
-	// Find rows that need checking (ats is empty)
 	type result struct {
 		idx int
 		ats string
@@ -184,9 +72,10 @@ func main() {
 	fmt.Printf("Total: %d companies, %d already have ATS, %d to check\n",
 		len(rows), len(rows)-len(toCheck), len(toCheck))
 
+	client := atsutil.NewHTTPClient()
 	results := make(chan result, len(toCheck))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 10) // concurrency limit
+	sem := make(chan struct{}, 10)
 
 	for _, idx := range toCheck {
 		wg.Add(1)
@@ -196,7 +85,7 @@ func main() {
 			defer func() { <-sem }()
 
 			company := rows[i].Company
-			ats := detectATS(company)
+			ats := atsutil.DetectATS(client, company)
 			if ats != "" {
 				fmt.Printf("  ✓ %s → %s\n", company, ats)
 			} else {
@@ -220,7 +109,6 @@ func main() {
 		}
 	}
 
-	// Write back
 	out, err := os.Create(csvPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error writing %s: %v\n", csvPath, err)
@@ -235,7 +123,6 @@ func main() {
 	}
 	writer.Flush()
 
-	// Summary
 	counts := map[string]int{}
 	for _, r := range rows {
 		if strings.HasPrefix(r.ATS, "not-found") {
