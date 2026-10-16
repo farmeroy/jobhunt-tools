@@ -9,7 +9,6 @@
 - [ ] Each title gets a binary relevant/irrelevant classification
 - [ ] Classification result is stored in the database (`title_relevant` field)
 - [ ] User's resume is included in the prompt as context for relevance judgment
-- [ ] Simple string pre-filter skips obviously wrong seniority (intern, staff, principal, VP, director) before hitting the LLM
 - [ ] Irrelevant postings are logged but not processed further
 
 ## Notes
@@ -17,4 +16,5 @@
 - Resume is loaded once and included in the system prompt
 - Batching: send all new titles from one fetch cycle in a single call (or chunked if too many)
 - Cost estimate: ~1 call per fetch cycle, minimal token usage
-- The pre-filter is just string matching to save API calls on obvious mismatches
+- A keyword pre-filter (title whitelist + location whitelist) already runs at fetch time (Story 1) before postings reach the DB — the LLM only sees postings that survived that filter
+- The LLM handles edge cases the keyword filter can't: ambiguous titles, seniority level judgment, relevance to the user's specific background

@@ -9,6 +9,8 @@ Wire up `job-monitor run` to orchestrate the fetch-and-dedup pipeline.
 ## Tasks
 
 - [ ] `job-monitor run` command — fetch all active companies with bounded concurrency
-- [ ] Call fetcher per company, upsert postings, mark stale
-- [ ] Log summary: companies checked, postings found, new postings
-- [ ] `--dry-run` flag — fetch but don't persist
+- [ ] Keyword pre-filter: title whitelist (engineer, developer, software, etc.) + location whitelist (remote, US-based) — drop non-matching postings before DB insert
+- [ ] Fetchers return location data alongside title/URL for the location filter
+- [ ] Call fetcher per company, filter, upsert postings, mark stale
+- [ ] Log summary: companies checked, postings found, postings filtered, new postings stored
+- [ ] `--dry-run` flag — fetch and filter but don't persist

@@ -11,6 +11,8 @@ A CLI tool that monitors target companies for new job postings, filters them for
        ↓
 [Job Fetcher]  — hit ATS APIs for each company
        ↓
+[Keyword Pre-Filter]  — title whitelist (engineer, developer, software, ...) + location whitelist (remote, US)
+       ↓
 [Dedup]  — compare against previously seen postings, surface only new ones
        ↓
 [LLM Filter — Pass 1: Title]  — cheap/fast: is this a relevant role?
@@ -92,7 +94,15 @@ Unique constraint on `(company_id, external_id)` for dedup.
 
 ## LLM Context
 
-The user's resume is loaded once and included in the system prompt for both filter passes. No separate relevance config — the resume *is* the relevance context. A simple string pre-filter excludes obviously wrong seniority levels (intern, staff, principal, VP, director) before hitting the LLM to save API calls.
+The user's resume is loaded once and included in the system prompt for both filter passes. No separate relevance config — the resume *is* the relevance context.
+
+### Keyword Pre-Filter (at fetch time)
+
+Before postings reach the database, a cheap keyword filter runs:
+- **Title whitelist**: posting title must contain one of: engineer, developer, software, sre, devops, platform, infrastructure, backend, frontend, fullstack, full-stack (case-insensitive)
+- **Location whitelist**: location must contain one of: remote, united states, US, california, san francisco, new york, hybrid — or be empty/missing (pass by default)
+
+This dramatically reduces volume before any LLM calls. The company list is curated for remote-friendly companies, so US-based postings are assumed remote-eligible. Lists are hardcoded initially, configurable later via config file.
 
 ## Configuration
 
