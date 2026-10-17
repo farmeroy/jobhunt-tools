@@ -10,6 +10,7 @@ type JobPosting struct {
 	Title       string
 	URL         string
 	Description string
+	Location    string
 }
 
 type Fetcher interface {

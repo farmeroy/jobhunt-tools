@@ -25,9 +25,9 @@ func (s *Store) UpsertPostings(companyID int64, postings []Posting) (int, error)
 
 		if err == sql.ErrNoRows {
 			_, err = tx.Exec(
-				`INSERT INTO postings (company_id, external_id, title, url, description, first_seen, last_seen)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				companyID, p.ExternalID, p.Title, p.URL, p.Description, now, now,
+				`INSERT INTO postings (company_id, external_id, title, url, location, description, first_seen, last_seen)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				companyID, p.ExternalID, p.Title, p.URL, p.Location, p.Description, now, now,
 			)
 			if err != nil {
 				return 0, err
@@ -37,8 +37,8 @@ func (s *Store) UpsertPostings(companyID int64, postings []Posting) (int, error)
 			return 0, err
 		} else {
 			_, err = tx.Exec(
-				`UPDATE postings SET title = ?, url = ?, description = ?, last_seen = ? WHERE id = ?`,
-				p.Title, p.URL, p.Description, now, existingID,
+				`UPDATE postings SET title = ?, url = ?, location = ?, description = ?, last_seen = ? WHERE id = ?`,
+				p.Title, p.URL, p.Location, p.Description, now, existingID,
 			)
 			if err != nil {
 				return 0, err
@@ -51,43 +51,52 @@ func (s *Store) UpsertPostings(companyID int64, postings []Posting) (int, error)
 
 func (s *Store) MarkStale(companyID int64, currentExternalIDs []string) error {
 	if len(currentExternalIDs) == 0 {
-		// Board is empty — all postings for this company are stale
-		_, err := s.db.Exec(
-			`UPDATE postings SET last_seen = last_seen WHERE company_id = ?`,
-			companyID,
-		)
-		return err
+		return nil
 	}
 
 	placeholders := strings.Repeat("?,", len(currentExternalIDs))
 	placeholders = placeholders[:len(placeholders)-1]
 
-	args := []any{companyID}
+	now := time.Now().UTC()
+	args := []any{now, companyID}
 	for _, id := range currentExternalIDs {
 		args = append(args, id)
 	}
 
-	query := `UPDATE postings SET last_seen = last_seen
-		WHERE company_id = ? AND external_id NOT IN (` + placeholders + `)`
+	query := `UPDATE postings SET last_seen = ?
+		WHERE company_id = ? AND external_id IN (` + placeholders + `)`
 	_, err := s.db.Exec(query, args...)
 	return err
 }
 
+func (s *Store) ListPostings(company string, newOnly bool) ([]Posting, error) {
+	query := `SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,
+		p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
+		p.notified_at, p.applied_at
+	 FROM postings p
+	 JOIN companies c ON c.id = p.company_id
+	 WHERE 1=1`
+	var args []any
+
+	if company != "" {
+		query += ` AND c.name LIKE ?`
+		args = append(args, "%"+company+"%")
+	}
+	if newOnly {
+		query += ` AND p.title_relevant IS NULL`
+	}
+	query += ` ORDER BY p.first_seen DESC`
+
+	return s.queryPostings(query, args...)
+}
+
 func (s *Store) GetNewUnfilteredPostings() ([]Posting, error) {
-	return s.queryPostings(
-		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.description,
-			p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
-			p.notified_at, p.applied_at
-		 FROM postings p
-		 JOIN companies c ON c.id = p.company_id
-		 WHERE p.title_relevant IS NULL
-		 ORDER BY p.first_seen DESC`,
-	)
+	return s.ListPostings("", true)
 }
 
 func (s *Store) GetTitlePassedUnscored() ([]Posting, error) {
 	return s.queryPostings(
-		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.description,
+		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,
 			p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
 			p.notified_at, p.applied_at
 		 FROM postings p
@@ -99,7 +108,7 @@ func (s *Store) GetTitlePassedUnscored() ([]Posting, error) {
 
 func (s *Store) GetUnnotifiedMatches(threshold float64) ([]Posting, error) {
 	return s.queryPostings(
-		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.description,
+		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,
 			p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
 			p.notified_at, p.applied_at
 		 FROM postings p
@@ -153,7 +162,7 @@ func (s *Store) queryPostings(query string, args ...any) ([]Posting, error) {
 	for rows.Next() {
 		var p Posting
 		if err := rows.Scan(
-			&p.ID, &p.CompanyID, &p.CompanyName, &p.ExternalID, &p.Title, &p.URL, &p.Description,
+			&p.ID, &p.CompanyID, &p.CompanyName, &p.ExternalID, &p.Title, &p.URL, &p.Location, &p.Description,
 			&p.FirstSeen, &p.LastSeen, &p.TitleRelevant, &p.ContentScore, &p.ContentReasoning,
 			&p.NotifiedAt, &p.AppliedAt,
 		); err != nil {

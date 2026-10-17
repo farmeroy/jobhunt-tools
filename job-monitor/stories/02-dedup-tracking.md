@@ -13,4 +13,5 @@
 ## Notes
 
 - The dedup key needs to be ATS-specific — Greenhouse uses numeric IDs, Ashby uses UUIDs, Lever uses hex IDs
-- Consider a `last_seen` timestamp to detect removed postings
+- `last_seen` timestamp is updated to now for postings still on the board; postings that disappear keep their old `last_seen`, which drifts behind — that's how staleness is detected
+- Only postings that pass the keyword pre-filter (Story 1) are stored; staleness tracking uses all fetched IDs from the ATS regardless of filter

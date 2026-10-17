@@ -75,6 +75,7 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 			ExternalID: j.ID,
 			Title:      j.Title,
 			URL:        fmt.Sprintf("%s/%s/%s", AshbyBaseURL, slug, j.ID),
+			Location:   j.LocationName,
 		}
 	}
 	return postings, nil

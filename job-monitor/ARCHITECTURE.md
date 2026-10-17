@@ -69,7 +69,7 @@ SQLite is the single source of truth for both companies and postings. The existi
 
 ### `companies` table
 - `id` — auto-increment
-- `name` — company name
+- `name` — company name (unique)
 - `slug` — URL-friendly name (for ATS API calls)
 - `ats` — ATS provider (greenhouse, ashby, lever, etc. or null if unknown)
 - `active` — boolean (whether to monitor this company)
@@ -81,6 +81,7 @@ SQLite is the single source of truth for both companies and postings. The existi
 - `external_id` — ATS-specific job ID
 - `title` — job title
 - `url` — application link
+- `location` — job location (from ATS, used for pre-filtering)
 - `description` — full job description (if fetched)
 - `first_seen` — timestamp
 - `last_seen` — timestamp (to detect removed postings)

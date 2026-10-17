@@ -37,6 +37,9 @@ func (g *Greenhouse) Fetch(ctx context.Context, client *http.Client, slug string
 			Title       string `json:"title"`
 			AbsoluteURL string `json:"absolute_url"`
 			Content     string `json:"content"`
+			Location    struct {
+				Name string `json:"name"`
+			} `json:"location"`
 		} `json:"jobs"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -50,6 +53,7 @@ func (g *Greenhouse) Fetch(ctx context.Context, client *http.Client, slug string
 			Title:       j.Title,
 			URL:         j.AbsoluteURL,
 			Description: j.Content,
+			Location:    j.Location.Name,
 		}
 	}
 	return postings, nil

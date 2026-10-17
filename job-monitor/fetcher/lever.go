@@ -35,6 +35,9 @@ func (l *Lever) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 		Text             string `json:"text"`
 		HostedURL        string `json:"hostedUrl"`
 		DescriptionPlain string `json:"descriptionPlain"`
+		Categories       struct {
+			Location string `json:"location"`
+		} `json:"categories"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&jobs); err != nil {
 		return nil, fmt.Errorf("lever: decode: %w", err)
@@ -47,6 +50,7 @@ func (l *Lever) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 			Title:       j.Text,
 			URL:         j.HostedURL,
 			Description: j.DescriptionPlain,
+			Location:    j.Categories.Location,
 		}
 	}
 	return postings, nil

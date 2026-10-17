@@ -18,6 +18,7 @@ type Posting struct {
 	ExternalID       string
 	Title            string
 	URL              string
+	Location         string
 	Description      string
 	FirstSeen        time.Time
 	LastSeen         time.Time
