@@ -1,6 +1,6 @@
 ---
 title: Store filter struct — replace single-purpose query methods
-status: todo
+status: done
 story: "2"
 ---
 

@@ -16,12 +16,19 @@ func (s *Store) DeactivateCompany(name string) error {
 	return err
 }
 
-func (s *Store) ListActiveCompanies() ([]Company, error) {
-	return s.queryCompanies(`SELECT id, name, slug, ats, active, added_at FROM companies WHERE active = 1 ORDER BY name`)
+type CompanyFilter struct {
+	Active *bool
 }
 
-func (s *Store) ListAllCompanies() ([]Company, error) {
-	return s.queryCompanies(`SELECT id, name, slug, ats, active, added_at FROM companies ORDER BY name`)
+func (s *Store) ListCompanies(f CompanyFilter) ([]Company, error) {
+	query := `SELECT id, name, slug, ats, active, added_at FROM companies`
+	var args []any
+	if f.Active != nil {
+		query += ` WHERE active = ?`
+		args = append(args, *f.Active)
+	}
+	query += ` ORDER BY name`
+	return s.queryCompanies(query, args...)
 }
 
 func (s *Store) UpdateSlug(companyID int64, slug string) error {

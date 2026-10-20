@@ -49,9 +49,9 @@ func (s *Store) UpsertPostings(companyID int64, postings []Posting) (int, error)
 	return newCount, tx.Commit()
 }
 
-func (s *Store) MarkStale(companyID int64, currentExternalIDs []string) error {
+func (s *Store) RefreshLastSeen(companyID int64, currentExternalIDs []string) (int64, error) {
 	if len(currentExternalIDs) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	placeholders := strings.Repeat("?,", len(currentExternalIDs))
@@ -65,11 +65,31 @@ func (s *Store) MarkStale(companyID int64, currentExternalIDs []string) error {
 
 	query := `UPDATE postings SET last_seen = ?
 		WHERE company_id = ? AND external_id IN (` + placeholders + `)`
-	_, err := s.db.Exec(query, args...)
-	return err
+	res, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
-func (s *Store) ListPostings(company string, newOnly bool) ([]Posting, error) {
+type PostingOrder int
+
+const (
+	OrderByFirstSeen PostingOrder = iota
+	OrderByScoreDesc
+)
+
+type PostingFilter struct {
+	Company           string
+	TitleUnclassified bool
+	TitleRelevant     *bool
+	Scored            *bool
+	ContentScoreMin   *float64
+	Notified          *bool
+	OrderBy           PostingOrder
+}
+
+func (s *Store) ListPostings(f PostingFilter) ([]Posting, error) {
 	query := `SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,
 		p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
 		p.notified_at, p.applied_at
@@ -78,20 +98,43 @@ func (s *Store) ListPostings(company string, newOnly bool) ([]Posting, error) {
 	 WHERE 1=1`
 	var args []any
 
-	if company != "" {
+	if f.Company != "" {
 		query += ` AND c.name LIKE ?`
-		args = append(args, "%"+company+"%")
+		args = append(args, "%"+f.Company+"%")
 	}
-	if newOnly {
+	if f.TitleUnclassified {
 		query += ` AND p.title_relevant IS NULL`
+	} else if f.TitleRelevant != nil {
+		query += ` AND p.title_relevant = ?`
+		args = append(args, *f.TitleRelevant)
 	}
-	query += ` ORDER BY p.first_seen DESC`
+	if f.Scored != nil {
+		if *f.Scored {
+			query += ` AND p.content_score IS NOT NULL`
+		} else {
+			query += ` AND p.content_score IS NULL`
+		}
+	}
+	if f.ContentScoreMin != nil {
+		query += ` AND p.content_score >= ?`
+		args = append(args, *f.ContentScoreMin)
+	}
+	if f.Notified != nil {
+		if *f.Notified {
+			query += ` AND p.notified_at IS NOT NULL`
+		} else {
+			query += ` AND p.notified_at IS NULL`
+		}
+	}
+
+	switch f.OrderBy {
+	case OrderByScoreDesc:
+		query += ` ORDER BY p.content_score DESC`
+	default:
+		query += ` ORDER BY p.first_seen DESC`
+	}
 
 	return s.queryPostings(query, args...)
-}
-
-func (s *Store) GetNewUnfilteredPostings() ([]Posting, error) {
-	return s.ListPostings("", true)
 }
 
 func (s *Store) GetDistinctTitles(since time.Time) ([]string, error) {
@@ -128,31 +171,6 @@ func (s *Store) SetTitleRelevanceByTitle(title string, relevant bool) (int64, er
 		return 0, err
 	}
 	return res.RowsAffected()
-}
-
-func (s *Store) GetTitlePassedUnscored() ([]Posting, error) {
-	return s.queryPostings(
-		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,
-			p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
-			p.notified_at, p.applied_at
-		 FROM postings p
-		 JOIN companies c ON c.id = p.company_id
-		 WHERE p.title_relevant = 1 AND p.content_score IS NULL
-		 ORDER BY p.first_seen DESC`,
-	)
-}
-
-func (s *Store) GetUnnotifiedMatches(threshold float64) ([]Posting, error) {
-	return s.queryPostings(
-		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,
-			p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
-			p.notified_at, p.applied_at
-		 FROM postings p
-		 JOIN companies c ON c.id = p.company_id
-		 WHERE p.content_score >= ? AND p.notified_at IS NULL
-		 ORDER BY p.content_score DESC`,
-		threshold,
-	)
 }
 
 func (s *Store) SetTitleRelevance(postingID int64, relevant bool) error {

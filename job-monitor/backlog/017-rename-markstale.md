@@ -1,6 +1,6 @@
 ---
 title: Rename MarkStale and handle empty boards
-status: todo
+status: done
 story: "2"
 ---
 

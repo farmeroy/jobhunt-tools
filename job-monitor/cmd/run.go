@@ -65,7 +65,7 @@ var runCmd = &cobra.Command{
 		}
 
 		// --- Fetch phase ---
-		companies, err := db.ListActiveCompanies()
+		companies, err := db.ListCompanies(store.CompanyFilter{Active: store.BoolPtr(true)})
 		if err != nil {
 			return err
 		}
@@ -137,8 +137,10 @@ var runCmd = &cobra.Command{
 				for j, p := range postings {
 					allIDs[j] = p.ExternalID
 				}
-				if err := db.MarkStale(company.ID, allIDs); err != nil {
-					log.Printf("  error %s (mark stale): %v", company.Name, err)
+				if len(allIDs) == 0 {
+					log.Printf("  warning %s: fetcher returned 0 postings, skipping last_seen refresh", company.Name)
+				} else if _, err := db.RefreshLastSeen(company.ID, allIDs); err != nil {
+					log.Printf("  error %s (refresh last seen): %v", company.Name, err)
 				}
 
 				log.Printf("  %s: %d fetched, %d matched, %d new", company.Name, len(postings), len(matched), newCount)
@@ -225,7 +227,10 @@ var runCmd = &cobra.Command{
 			usage.InputTokens, usage.OutputTokens, usage.Calls)
 
 		// --- Content scoring phase ---
-		unscored, err := db.GetTitlePassedUnscored()
+		unscored, err := db.ListPostings(store.PostingFilter{
+			TitleRelevant: store.BoolPtr(true),
+			Scored:        store.BoolPtr(false),
+		})
 		if err != nil {
 			return fmt.Errorf("get unscored postings: %w", err)
 		}
@@ -274,7 +279,11 @@ var runCmd = &cobra.Command{
 			contentUsage.InputTokens, contentUsage.OutputTokens, contentUsage.Calls)
 
 		// --- Output matches ---
-		matches, err := db.GetUnnotifiedMatches(scoreThreshold)
+		matches, err := db.ListPostings(store.PostingFilter{
+			ContentScoreMin: &scoreThreshold,
+			Notified:        store.BoolPtr(false),
+			OrderBy:         store.OrderByScoreDesc,
+		})
 		if err != nil {
 			return fmt.Errorf("get unnotified matches: %w", err)
 		}

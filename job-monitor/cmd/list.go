@@ -18,11 +18,11 @@ var listCmd = &cobra.Command{
 		var companies []store.Company
 		var err error
 
-		if listAll {
-			companies, err = db.ListAllCompanies()
-		} else {
-			companies, err = db.ListActiveCompanies()
+		f := store.CompanyFilter{}
+		if !listAll {
+			f.Active = store.BoolPtr(true)
 		}
+		companies, err = db.ListCompanies(f)
 		if err != nil {
 			return err
 		}

@@ -41,9 +41,9 @@ func TestAddAndListCompanies(t *testing.T) {
 		t.Fatal("expected non-zero company ID")
 	}
 
-	companies, err := s.ListActiveCompanies()
+	companies, err := s.ListCompanies(CompanyFilter{Active: BoolPtr(true)})
 	if err != nil {
-		t.Fatalf("ListActiveCompanies: %v", err)
+		t.Fatalf("ListCompanies: %v", err)
 	}
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 company, got %d", len(companies))
@@ -61,12 +61,12 @@ func TestDeactivateCompany(t *testing.T) {
 		t.Fatalf("DeactivateCompany: %v", err)
 	}
 
-	active, _ := s.ListActiveCompanies()
+	active, _ := s.ListCompanies(CompanyFilter{Active: BoolPtr(true)})
 	if len(active) != 0 {
 		t.Errorf("expected 0 active companies, got %d", len(active))
 	}
 
-	all, _ := s.ListAllCompanies()
+	all, _ := s.ListCompanies(CompanyFilter{})
 	if len(all) != 1 {
 		t.Errorf("expected 1 total company, got %d", len(all))
 	}
@@ -80,7 +80,7 @@ func TestUpdateSlug(t *testing.T) {
 		t.Fatalf("UpdateSlug: %v", err)
 	}
 
-	companies, _ := s.ListActiveCompanies()
+	companies, _ := s.ListCompanies(CompanyFilter{Active: BoolPtr(true)})
 	if companies[0].Slug != "airbnb" {
 		t.Errorf("expected slug 'airbnb', got %q", companies[0].Slug)
 	}
@@ -122,7 +122,7 @@ func TestUpsertPostingsDedup(t *testing.T) {
 		t.Errorf("expected 0 new postings on dedup, got %d", newCount)
 	}
 
-	all, _ := s.GetNewUnfilteredPostings()
+	all, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
 	if len(all) != 1 {
 		t.Fatalf("expected 1 posting, got %d", len(all))
 	}
@@ -141,9 +141,9 @@ func TestMarkStaleEmptyBoard(t *testing.T) {
 	})
 
 	// Empty board — all postings should become stale (last_seen not updated)
-	err := s.MarkStale(coID, []string{})
+	_, err := s.RefreshLastSeen(coID, []string{})
 	if err != nil {
-		t.Fatalf("MarkStale with empty list: %v", err)
+		t.Fatalf("RefreshLastSeen with empty list: %v", err)
 	}
 
 	// Verify the query ran without error and didn't delete anything
@@ -154,7 +154,7 @@ func TestMarkStaleEmptyBoard(t *testing.T) {
 	}
 }
 
-func TestGetNewUnfilteredPostings(t *testing.T) {
+func TestListPostingsUnclassified(t *testing.T) {
 	s := openTestStore(t)
 	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")
 
@@ -163,15 +163,15 @@ func TestGetNewUnfilteredPostings(t *testing.T) {
 		{ExternalID: "2", Title: "Designer"},
 	})
 
-	all, _ := s.GetNewUnfilteredPostings()
+	all, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
 	s.SetTitleRelevance(all[0].ID, true)
 
-	unfiltered, err := s.GetNewUnfilteredPostings()
+	unclassified, err := s.ListPostings(PostingFilter{TitleUnclassified: true})
 	if err != nil {
-		t.Fatalf("GetNewUnfilteredPostings: %v", err)
+		t.Fatalf("ListPostings unclassified: %v", err)
 	}
-	if len(unfiltered) != 1 {
-		t.Errorf("expected 1 unfiltered posting, got %d", len(unfiltered))
+	if len(unclassified) != 1 {
+		t.Errorf("expected 1 unclassified posting, got %d", len(unclassified))
 	}
 }
 
@@ -183,15 +183,15 @@ func TestSetContentScoreAndGetUnnotified(t *testing.T) {
 		{ExternalID: "1", Title: "Engineer"},
 	})
 
-	postings, _ := s.GetNewUnfilteredPostings()
+	postings, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
 	id := postings[0].ID
 
 	s.SetTitleRelevance(id, true)
 	s.SetContentScore(id, 8.5, "Great match")
 
-	matches, err := s.GetUnnotifiedMatches(6.0)
+	matches, err := s.ListPostings(PostingFilter{ContentScoreMin: Float64Ptr(6.0), Notified: BoolPtr(false)})
 	if err != nil {
-		t.Fatalf("GetUnnotifiedMatches: %v", err)
+		t.Fatalf("ListPostings unnotified matches: %v", err)
 	}
 	if len(matches) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(matches))
@@ -206,7 +206,7 @@ func TestMarkNotified(t *testing.T) {
 	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")
 
 	s.UpsertPostings(coID, []Posting{{ExternalID: "1", Title: "Engineer"}})
-	postings, _ := s.GetNewUnfilteredPostings()
+	postings, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
 	id := postings[0].ID
 
 	s.SetTitleRelevance(id, true)
@@ -216,7 +216,7 @@ func TestMarkNotified(t *testing.T) {
 		t.Fatalf("MarkNotified: %v", err)
 	}
 
-	matches, _ := s.GetUnnotifiedMatches(6.0)
+	matches, _ := s.ListPostings(PostingFilter{ContentScoreMin: Float64Ptr(6.0), Notified: BoolPtr(false)})
 	if len(matches) != 0 {
 		t.Errorf("expected 0 unnotified matches after marking, got %d", len(matches))
 	}
@@ -228,7 +228,7 @@ func TestMarkNotified(t *testing.T) {
 	}
 }
 
-func TestGetTitlePassedUnscored(t *testing.T) {
+func TestListPostingsTitlePassedUnscored(t *testing.T) {
 	s := openTestStore(t)
 	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")
 
@@ -237,13 +237,13 @@ func TestGetTitlePassedUnscored(t *testing.T) {
 		{ExternalID: "2", Title: "Designer"},
 	})
 
-	all, _ := s.GetNewUnfilteredPostings()
+	all, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
 	s.SetTitleRelevance(all[0].ID, true)
 	s.SetTitleRelevance(all[1].ID, false)
 
-	unscored, err := s.GetTitlePassedUnscored()
+	unscored, err := s.ListPostings(PostingFilter{TitleRelevant: BoolPtr(true), Scored: BoolPtr(false)})
 	if err != nil {
-		t.Fatalf("GetTitlePassedUnscored: %v", err)
+		t.Fatalf("ListPostings title-passed unscored: %v", err)
 	}
 	if len(unscored) != 1 {
 		t.Errorf("expected 1 title-passed unscored posting, got %d", len(unscored))

@@ -22,11 +22,15 @@ var postingsCmd = &cobra.Command{
 		var postings []store.Posting
 		var err error
 
+		f := store.PostingFilter{Company: postingsCompany}
 		if postingsMinScore > 0 {
-			postings, err = db.GetUnnotifiedMatches(postingsMinScore)
-		} else {
-			postings, err = db.ListPostings(postingsCompany, postingsNew)
+			f.ContentScoreMin = &postingsMinScore
+			f.OrderBy = store.OrderByScoreDesc
 		}
+		if postingsNew {
+			f.TitleUnclassified = true
+		}
+		postings, err = db.ListPostings(f)
 		if err != nil {
 			return err
 		}

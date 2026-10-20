@@ -43,7 +43,7 @@ func TestImportCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	companies, err := db.ListActiveCompanies()
+	companies, err := db.ListCompanies(store.CompanyFilter{Active: store.BoolPtr(true)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestImportDuplicateSkipped(t *testing.T) {
 		t.Errorf("expected duplicate skip message, got: %s", output)
 	}
 
-	companies, err := db.ListAllCompanies()
+	companies, err := db.ListCompanies(store.CompanyFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,12 +100,12 @@ func TestRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	companies, _ := db.ListActiveCompanies()
+	companies, _ := db.ListCompanies(store.CompanyFilter{Active: store.BoolPtr(true)})
 	if len(companies) != 0 {
 		t.Fatalf("expected 0 active companies after remove, got %d", len(companies))
 	}
 
-	all, _ := db.ListAllCompanies()
+	all, _ := db.ListCompanies(store.CompanyFilter{})
 	if len(all) != 1 {
 		t.Fatal("company should still exist as inactive")
 	}
