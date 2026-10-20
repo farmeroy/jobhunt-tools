@@ -94,6 +94,42 @@ func (s *Store) GetNewUnfilteredPostings() ([]Posting, error) {
 	return s.ListPostings("", true)
 }
 
+func (s *Store) GetDistinctTitles(since time.Time) ([]string, error) {
+	query := `SELECT DISTINCT title FROM postings`
+	var args []any
+
+	if !since.IsZero() {
+		query += ` WHERE first_seen >= ?`
+		args = append(args, since)
+	}
+
+	query += ` ORDER BY title`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var titles []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		titles = append(titles, t)
+	}
+	return titles, rows.Err()
+}
+
+func (s *Store) SetTitleRelevanceByTitle(title string, relevant bool) (int64, error) {
+	res, err := s.db.Exec(`UPDATE postings SET title_relevant = ? WHERE title = ?`, relevant, title)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) GetTitlePassedUnscored() ([]Posting, error) {
 	return s.queryPostings(
 		`SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,

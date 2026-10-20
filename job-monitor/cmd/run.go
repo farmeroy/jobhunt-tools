@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"jobhunt/tools/internal/atsutil"
 	"jobhunt/tools/job-monitor/fetcher"
@@ -18,8 +21,9 @@ import (
 )
 
 var (
-	dryRun     bool
-	resumePath string
+	dryRun      bool
+	resumePath  string
+	reclassify  string
 )
 
 var runCmd = &cobra.Command{
@@ -157,31 +161,41 @@ var runCmd = &cobra.Command{
 			return nil
 		}
 
-		unfiltered, err := db.GetNewUnfilteredPostings()
-		if err != nil {
-			return fmt.Errorf("get unfiltered postings: %w", err)
+		var since time.Time
+		if reclassify != "" {
+			d, err := parseDuration(reclassify)
+			if err != nil {
+				return fmt.Errorf("invalid --reclassify value %q: %w", reclassify, err)
+			}
+			since = time.Now().UTC().Add(-d)
+			fmt.Fprintf(cmd.OutOrStdout(), "Reclassifying titles from postings since %s\n", since.Format("2006-01-02"))
 		}
-		if len(unfiltered) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "No unclassified postings to analyze")
+
+		titles, err := db.GetDistinctTitles(since)
+		if err != nil {
+			return fmt.Errorf("get titles: %w", err)
+		}
+		if len(titles) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No titles to classify")
 			return nil
 		}
 
+		fmt.Fprintf(cmd.OutOrStdout(), "Classifying %d unique titles...\n", len(titles))
+
 		llmClient := anthropic.NewClient()
-		classifications, err := filter.FilterTitles(ctx, &llmClient, resumeText, unfiltered)
+		classifications, err := filter.FilterTitles(ctx, &llmClient, resumeText, titles)
 		if err != nil {
 			return fmt.Errorf("title classification: %w", err)
 		}
 
-		var relevant, irrelevant int
-		for _, p := range unfiltered {
-			r, ok := classifications[p.ID]
-			if !ok {
+		var relevant, irrelevant, postingsUpdated int
+		for title, r := range classifications {
+			n, err := db.SetTitleRelevanceByTitle(title, r)
+			if err != nil {
+				log.Printf("  error setting relevance for %q: %v", title, err)
 				continue
 			}
-			if err := db.SetTitleRelevance(p.ID, r); err != nil {
-				log.Printf("  error setting relevance for posting %d: %v", p.ID, err)
-				continue
-			}
+			postingsUpdated += int(n)
 			if r {
 				relevant++
 			} else {
@@ -189,15 +203,38 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Classified %d titles: %d relevant, %d irrelevant\n",
-			relevant+irrelevant, relevant, irrelevant)
+		fmt.Fprintf(cmd.OutOrStdout(), "Classified %d unique titles (%d relevant, %d irrelevant), updated %d postings\n",
+			relevant+irrelevant, relevant, irrelevant, postingsUpdated)
 
 		return nil
 	},
 }
 
+func parseDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return 0, fmt.Errorf("expected number followed by d, w, or h (e.g. 7d, 2w, 24h)")
+	}
+	unit := s[len(s)-1]
+	num, err := strconv.Atoi(s[:len(s)-1])
+	if err != nil {
+		return 0, fmt.Errorf("expected number followed by d, w, or h (e.g. 7d, 2w, 24h)")
+	}
+	switch unit {
+	case 'h':
+		return time.Duration(num) * time.Hour, nil
+	case 'd':
+		return time.Duration(num) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(num) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unknown unit %q, use d, w, or h", string(unit))
+	}
+}
+
 func init() {
 	runCmd.Flags().BoolVar(&dryRun, "dry-run", false, "fetch and filter but don't persist to database")
 	runCmd.Flags().StringVar(&resumePath, "resume", "", "path to resume file (PDF, txt, or md) for title classification")
+	runCmd.Flags().StringVar(&reclassify, "reclassify", "", "reclassify titles from postings within this period (e.g. 7d, 2w)")
 	rootCmd.AddCommand(runCmd)
 }

@@ -8,11 +8,12 @@ import (
 )
 
 func TestParseToolUseResponse(t *testing.T) {
+	titles := []string{"Software Engineer", "Product Manager", "Backend Developer"}
 	input := titleResults{
 		Results: []titleResult{
-			{ID: 1, Relevant: true},
-			{ID: 2, Relevant: false},
-			{ID: 3, Relevant: true},
+			{Index: 0, Relevant: true},
+			{Index: 1, Relevant: false},
+			{Index: 2, Relevant: true},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
@@ -27,21 +28,53 @@ func TestParseToolUseResponse(t *testing.T) {
 		},
 	}
 
-	results, err := parseToolUseResponse(msg)
+	results, err := parseToolUseResponse(msg, titles, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
 	}
-	if !results[1] {
-		t.Error("expected ID 1 to be relevant")
+	if !results["Software Engineer"] {
+		t.Error("expected Software Engineer to be relevant")
 	}
-	if results[2] {
-		t.Error("expected ID 2 to be irrelevant")
+	if results["Product Manager"] {
+		t.Error("expected Product Manager to be irrelevant")
 	}
-	if !results[3] {
-		t.Error("expected ID 3 to be relevant")
+	if !results["Backend Developer"] {
+		t.Error("expected Backend Developer to be relevant")
+	}
+}
+
+func TestParseToolUseResponseWithOffset(t *testing.T) {
+	titles := []string{"DevOps Engineer", "Data Scientist"}
+	input := titleResults{
+		Results: []titleResult{
+			{Index: 100, Relevant: true},
+			{Index: 101, Relevant: false},
+		},
+	}
+	inputJSON, _ := json.Marshal(input)
+
+	msg := &anthropic.Message{
+		Content: []anthropic.ContentBlockUnion{
+			{
+				Type:  "tool_use",
+				Name:  "classify_titles",
+				Input: inputJSON,
+			},
+		},
+	}
+
+	results, err := parseToolUseResponse(msg, titles, 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !results["DevOps Engineer"] {
+		t.Error("expected DevOps Engineer to be relevant")
+	}
+	if results["Data Scientist"] {
+		t.Error("expected Data Scientist to be irrelevant")
 	}
 }
 
@@ -52,14 +85,8 @@ func TestParseToolUseResponseNoToolUse(t *testing.T) {
 		},
 	}
 
-	_, err := parseToolUseResponse(msg)
+	_, err := parseToolUseResponse(msg, []string{"test"}, 0)
 	if err == nil {
 		t.Fatal("expected error for missing tool_use block")
-	}
-}
-
-func TestChunking(t *testing.T) {
-	if chunkSize != 100 {
-		t.Fatalf("expected chunk size 100, got %d", chunkSize)
 	}
 }
