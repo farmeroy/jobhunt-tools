@@ -5,10 +5,10 @@
 ## Acceptance Criteria
 
 - [ ] Postings that pass the title filter have their full description fetched (if not already)
-- [ ] Each description is scored against the user's CV and stated preferences using Haiku 4.5
-- [ ] Returns a match score (e.g., 1-10) and brief reasoning
-- [ ] Reasoning highlights key requirements met and unmet
-- [ ] Score and reasoning are stored in the database
+- [x] Each description is scored against the user's CV and stated preferences using Haiku 4.5
+- [x] Returns a match score (e.g., 1-10) and brief reasoning
+- [x] Reasoning highlights key requirements met and unmet
+- [x] Score and reasoning are stored in the database
 - [ ] Only postings above a configurable score threshold proceed to notification
 
 ## Notes

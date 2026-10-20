@@ -24,9 +24,10 @@ import (
 )
 
 var (
-	dryRun      bool
-	resumePath  string
-	reclassify  string
+	dryRun         bool
+	resumePath     string
+	reclassify     string
+	scoreThreshold float64
 )
 
 var runCmd = &cobra.Command{
@@ -222,6 +223,52 @@ var runCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Token usage: %d input, %d output (%d API calls)\n",
 			usage.InputTokens, usage.OutputTokens, usage.Calls)
 
+		// --- Content scoring phase ---
+		unscored, err := db.GetTitlePassedUnscored()
+		if err != nil {
+			return fmt.Errorf("get unscored postings: %w", err)
+		}
+		// TODO: remove this limit after testing content scoring
+		if len(unscored) > 5 {
+			unscored = unscored[:5]
+		}
+		if len(unscored) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No postings to score")
+			return nil
+		}
+
+		contentPostings := make([]filter.ContentPosting, len(unscored))
+		for i, p := range unscored {
+			contentPostings[i] = filter.ContentPosting{
+				ID:          p.ID,
+				Title:       p.Title,
+				Description: p.Description,
+			}
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "Scoring %d postings against resume...\n", len(unscored))
+
+		scored, contentUsage, err := filter.ScoreContent(ctx, &llmClient, resumeText, contentPostings)
+		if err != nil {
+			return fmt.Errorf("content scoring: %w", err)
+		}
+
+		var aboveThreshold int
+		for _, r := range scored {
+			if err := db.SetContentScore(r.PostingID, r.Score, r.Reasoning); err != nil {
+				log.Printf("  error saving score for posting %d: %v", r.PostingID, err)
+				continue
+			}
+			if r.Score >= scoreThreshold {
+				aboveThreshold++
+			}
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "Scored %d postings: %d above threshold (%.0f)\n",
+			len(scored), aboveThreshold, scoreThreshold)
+		fmt.Fprintf(cmd.OutOrStdout(), "Content scoring tokens: %d input, %d output (%d API calls)\n",
+			contentUsage.InputTokens, contentUsage.OutputTokens, contentUsage.Calls)
+
 		return nil
 	},
 }
@@ -252,5 +299,6 @@ func init() {
 	runCmd.Flags().BoolVar(&dryRun, "dry-run", false, "fetch and filter but don't persist to database")
 	runCmd.Flags().StringVar(&resumePath, "resume", "", "path to resume file (PDF, txt, or md) for title classification")
 	runCmd.Flags().StringVar(&reclassify, "reclassify", "", "reclassify titles from postings within this period (e.g. 7d, 2w)")
+	runCmd.Flags().Float64Var(&scoreThreshold, "score-threshold", 7.0, "minimum content score (1-10) for notification")
 	rootCmd.AddCommand(runCmd)
 }
