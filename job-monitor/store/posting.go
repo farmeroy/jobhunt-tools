@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"strings"
 	"time"
 )
@@ -13,40 +12,32 @@ func (s *Store) UpsertPostings(companyID int64, postings []Posting) (int, error)
 	}
 	defer tx.Rollback()
 
-	newCount := 0
+	var countBefore int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM postings WHERE company_id = ?`, companyID).Scan(&countBefore); err != nil {
+		return 0, err
+	}
+
 	now := time.Now().UTC()
-
 	for _, p := range postings {
-		var existingID int64
-		err := tx.QueryRow(
-			`SELECT id FROM postings WHERE company_id = ? AND external_id = ?`,
-			companyID, p.ExternalID,
-		).Scan(&existingID)
-
-		if err == sql.ErrNoRows {
-			_, err = tx.Exec(
-				`INSERT INTO postings (company_id, external_id, title, url, location, description, first_seen, last_seen)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				companyID, p.ExternalID, p.Title, p.URL, p.Location, p.Description, now, now,
-			)
-			if err != nil {
-				return 0, err
-			}
-			newCount++
-		} else if err != nil {
+		_, err := tx.Exec(
+			`INSERT INTO postings (company_id, external_id, title, url, location, description, first_seen, last_seen)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(company_id, external_id) DO UPDATE SET
+			   title = excluded.title, url = excluded.url, location = excluded.location,
+			   description = excluded.description, last_seen = excluded.last_seen`,
+			companyID, p.ExternalID, p.Title, p.URL, p.Location, p.Description, now, now,
+		)
+		if err != nil {
 			return 0, err
-		} else {
-			_, err = tx.Exec(
-				`UPDATE postings SET title = ?, url = ?, location = ?, description = ?, last_seen = ? WHERE id = ?`,
-				p.Title, p.URL, p.Location, p.Description, now, existingID,
-			)
-			if err != nil {
-				return 0, err
-			}
 		}
 	}
 
-	return newCount, tx.Commit()
+	var countAfter int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM postings WHERE company_id = ?`, companyID).Scan(&countAfter); err != nil {
+		return 0, err
+	}
+
+	return countAfter - countBefore, tx.Commit()
 }
 
 func (s *Store) RefreshLastSeen(companyID int64, currentExternalIDs []string) (int64, error) {

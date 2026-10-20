@@ -1,5 +1,7 @@
 package store
 
+import "fmt"
+
 func (s *Store) AddCompany(name, slug, ats string) (int64, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO companies (name, slug, ats) VALUES (?, ?, ?)`,
@@ -12,8 +14,18 @@ func (s *Store) AddCompany(name, slug, ats string) (int64, error) {
 }
 
 func (s *Store) DeactivateCompany(name string) error {
-	_, err := s.db.Exec(`UPDATE companies SET active = 0 WHERE name = ?`, name)
-	return err
+	res, err := s.db.Exec(`UPDATE companies SET active = 0 WHERE name = ?`, name)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("company %q not found", name)
+	}
+	return nil
 }
 
 type CompanyFilter struct {

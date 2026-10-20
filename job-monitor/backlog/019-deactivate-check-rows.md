@@ -1,6 +1,6 @@
 ---
 title: DeactivateCompany should verify the company exists
-status: todo
+status: done
 story: "6"
 ---
 

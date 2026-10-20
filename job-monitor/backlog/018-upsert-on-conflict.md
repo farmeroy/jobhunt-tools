@@ -1,6 +1,6 @@
 ---
 title: UpsertPostings — use SQLite ON CONFLICT
-status: todo
+status: done
 story: "2"
 ---
 
