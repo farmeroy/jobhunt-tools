@@ -97,6 +97,10 @@ Unique constraint on `(company_id, external_id)` for dedup.
 
 The user's resume is loaded once and included in the system prompt for both filter passes. No separate relevance config — the resume *is* the relevance context.
 
+### Resume Loading
+
+Resume is loaded via `resume.LoadText(path)`. Supports `.pdf`, `.txt`, and `.md`. PDF text extraction uses pdfcpu (pure Go, no system dependencies). The extracted text is cached in memory for the duration of the run — no re-parsing per call.
+
 ### Keyword Pre-Filter (at fetch time)
 
 Before postings reach the database, a cheap keyword filter runs:
@@ -107,11 +111,13 @@ This dramatically reduces volume before any LLM calls. The company list is curat
 
 ## Configuration
 
-Minimal config file (YAML or TOML):
-- Path to resume (PDF or text)
-- Notification settings: email address
-- Anthropic API key (or env var)
-- SQLite database path
+- `--db` flag — SQLite database path (default: `job-monitor.db`)
+- `--resume` flag — path to resume file (PDF, txt, or md)
+- `ANTHROPIC_API_KEY` env var — required for LLM filter commands
+
+### System Dependencies
+
+- `pdftotext` (poppler-utils) — PDF resume text extraction. Install: `apt install poppler-utils`
 
 ## Project Structure
 
