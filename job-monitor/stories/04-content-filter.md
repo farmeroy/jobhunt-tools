@@ -16,3 +16,5 @@
 - Resume is loaded once and included in each prompt as context (same as title filter)
 - The LLM judges fit holistically from the resume — no separate config of preferences needed
 - One API call per posting — but only title-relevant postings reach this stage
+- Content scoring also validates location: an allowed-locations list (e.g. "remote US", "hybrid US") is included in the prompt so the LLM can reject postings where the description reveals an out-of-scope location
+- Prompt framing: adversarial recruiter perspective — "Would you pass this candidate on to the hiring manager?"

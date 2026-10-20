@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
@@ -13,6 +14,7 @@ import (
 type ContentPosting struct {
 	ID          int64
 	Title       string
+	Location    string
 	Description string
 }
 
@@ -47,7 +49,7 @@ var scoreTool = anthropic.ToolParam{
 	},
 }
 
-func ScoreContent(ctx context.Context, client *anthropic.Client, resumeText string, postings []ContentPosting) ([]ContentResult, *Usage, error) {
+func ScoreContent(ctx context.Context, client *anthropic.Client, resumeText string, allowedLocations []string, postings []ContentPosting) ([]ContentResult, *Usage, error) {
 	usage := &Usage{}
 
 	var skipped int
@@ -59,7 +61,7 @@ func ScoreContent(ctx context.Context, client *anthropic.Client, resumeText stri
 			continue
 		}
 
-		result, resp, err := scorePosting(ctx, client, resumeText, p)
+		result, resp, err := scorePosting(ctx, client, resumeText, allowedLocations, p)
 		if err != nil {
 			log.Printf("  error scoring posting %d (%s): %v", p.ID, p.Title, err)
 			continue
@@ -76,12 +78,22 @@ func ScoreContent(ctx context.Context, client *anthropic.Client, resumeText stri
 	return results, usage, nil
 }
 
-func scorePosting(ctx context.Context, client *anthropic.Client, resumeText string, p ContentPosting) (*ContentResult, *anthropic.Message, error) {
+func scorePosting(ctx context.Context, client *anthropic.Client, resumeText string, allowedLocations []string, p ContentPosting) (*ContentResult, *anthropic.Message, error) {
+	locationConstraint := ""
+	if len(allowedLocations) > 0 {
+		locationConstraint = fmt.Sprintf("\n\nLocation constraint: The candidate can only accept roles in these locations: %s. If the posting location or job description indicates the role requires a location outside this list, that is a disqualifying mismatch — score 1. Use geographic reasoning: \"Remote California\" is within \"Remote US\", but \"Remote Canada\" is not.", strings.Join(allowedLocations, ", "))
+	}
+
+	postingLocation := ""
+	if p.Location != "" {
+		postingLocation = fmt.Sprintf("\nPosting Location: %s", p.Location)
+	}
+
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.ModelClaudeHaiku4_5,
 		MaxTokens: 1024,
 		System: []anthropic.TextBlockParam{
-			{Text: fmt.Sprintf("You are a recruiter screening candidates for the following role:\n\nTitle: %s\n\nJob Description:\n%s\n\nYou are thorough and slightly skeptical. You look for concrete evidence of fit, not just keyword overlap.", p.Title, p.Description)},
+			{Text: fmt.Sprintf("You are a recruiter screening candidates for the following role:\n\nTitle: %s%s\n\nJob Description:\n%s\n\nYou are thorough and slightly skeptical. You look for concrete evidence of fit, not just keyword overlap.%s", p.Title, postingLocation, p.Description, locationConstraint)},
 		},
 		Messages: []anthropic.MessageParam{
 			{

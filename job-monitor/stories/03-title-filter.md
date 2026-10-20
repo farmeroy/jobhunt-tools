@@ -27,4 +27,5 @@
 ## Known Issues
 
 - Title filter is too strict with the current prompt — needs loosening to be a wide net (content filter should be the strict pass)
-- Seniority inference from resume is imprecise — blacklist regex for explicit exclusions is a backlog item
+- Seniority inference from resume is imprecise — config-driven target roles (backlog 006) will replace/supplement inference; hard blacklist deferred
+- Seniority-mismatched titles (e.g. "Senior Backend Engineer") still pass both the title filter and content scorer. The title filter intentionally casts a wide net, and the content scorer focuses on skills/description fit. Unclear where seniority filtering belongs — config-driven target roles (backlog 006) may help by giving the LLM explicit seniority signals

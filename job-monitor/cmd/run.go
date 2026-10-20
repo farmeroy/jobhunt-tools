@@ -16,6 +16,7 @@ import (
 	"jobhunt/tools/internal/atsutil"
 	"jobhunt/tools/job-monitor/fetcher"
 	"jobhunt/tools/job-monitor/filter"
+	"jobhunt/tools/job-monitor/notify"
 	"jobhunt/tools/job-monitor/resume"
 	"jobhunt/tools/job-monitor/store"
 
@@ -230,7 +231,7 @@ var runCmd = &cobra.Command{
 		}
 		// TODO: remove this limit after testing content scoring
 		if len(unscored) > 5 {
-			unscored = unscored[:5]
+			unscored = unscored[:20]
 		}
 		if len(unscored) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "No postings to score")
@@ -242,13 +243,16 @@ var runCmd = &cobra.Command{
 			contentPostings[i] = filter.ContentPosting{
 				ID:          p.ID,
 				Title:       p.Title,
+				Location:    p.Location,
 				Description: p.Description,
 			}
 		}
 
+		allowedLocations := []string{"remote US", "hybrid US"}
+
 		fmt.Fprintf(cmd.OutOrStdout(), "Scoring %d postings against resume...\n", len(unscored))
 
-		scored, contentUsage, err := filter.ScoreContent(ctx, &llmClient, resumeText, contentPostings)
+		scored, contentUsage, err := filter.ScoreContent(ctx, &llmClient, resumeText, allowedLocations, contentPostings)
 		if err != nil {
 			return fmt.Errorf("content scoring: %w", err)
 		}
@@ -268,6 +272,31 @@ var runCmd = &cobra.Command{
 			len(scored), aboveThreshold, scoreThreshold)
 		fmt.Fprintf(cmd.OutOrStdout(), "Content scoring tokens: %d input, %d output (%d API calls)\n",
 			contentUsage.InputTokens, contentUsage.OutputTokens, contentUsage.Calls)
+
+		// --- Output matches ---
+		matches, err := db.GetUnnotifiedMatches(scoreThreshold)
+		if err != nil {
+			return fmt.Errorf("get unnotified matches: %w", err)
+		}
+		if len(matches) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No new matches to report")
+			return nil
+		}
+
+		matchesFile := filepath.Join(filepath.Dir(dbPath), "matches.txt")
+		if err := notify.WriteMatchesFile(matchesFile, matches); err != nil {
+			return fmt.Errorf("write matches file: %w", err)
+		}
+
+		ids := make([]int64, len(matches))
+		for i, m := range matches {
+			ids[i] = m.ID
+		}
+		if err := db.MarkNotified(ids); err != nil {
+			return fmt.Errorf("mark notified: %w", err)
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "Wrote %d matches to %s\n", len(matches), matchesFile)
 
 		return nil
 	},

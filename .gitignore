@@ -27,5 +27,8 @@ Thumbs.db
 # Go
 /vendor/
 
+# Output
+matches.txt
+
 # Test artifacts
 coverage.out
