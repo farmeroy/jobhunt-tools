@@ -13,12 +13,18 @@
 
 ## Implementation Notes
 
-- Resume is loaded once via `resume.LoadText(path)` and included in the system prompt
+- **Distinct titles, not individual postings** — `GetDistinctTitles()` deduplicates before sending to the LLM, then `SetTitleRelevanceByTitle()` bulk-updates all postings with that title
+- **Two-step prompt** — first call infers target titles from the resume, second call classifies against those targets. Keeps the classification prompt focused and cheaper (no resume in the classify call)
+- **Resume text via pdftotext** — `resume.LoadText(path)` extracts text from PDF via `pdftotext` (poppler-utils), also supports .txt/.md
 - Uses Anthropic tool_use for structured output — guaranteed JSON schema
-- Batching: titles chunked at 100 per API call
-- Classification runs on **all unclassified postings** (`title_relevant IS NULL`), not just the current run's fetch — handles backfill from failed runs, newly added companies, DB re-seeds
-- Resume updates don't reclassify old postings — only new unclassified ones get the updated context
+- Batching: titles chunked at 100 per API call, numeric indices for robust round-tripping
+- `--reclassify` flag re-runs classification on postings within a time period (e.g. `--reclassify 7d`)
 - `run` command is the full pipeline: fetch → classify. `--resume` flag triggers classification; without it, only fetch runs
-- A keyword pre-filter (title whitelist + location whitelist) already runs at fetch time (Story 1) before postings reach the DB — the LLM only sees postings that survived that filter
-- The LLM handles edge cases the keyword filter can't: ambiguous titles, seniority level judgment, relevance to the user's specific background
-- Prompt eval to be built from real classification mistakes after initial results
+- A keyword pre-filter (title whitelist + location whitelist) already runs at fetch time (Story 1) before postings reach the DB
+- Token usage tracked per run (input, output, call count)
+- All classification results logged to `.logs/` with per-title detail
+
+## Known Issues
+
+- Title filter is too strict with the current prompt — needs loosening to be a wide net (content filter should be the strict pass)
+- Seniority inference from resume is imprecise — blacklist regex for explicit exclusions is a backlog item

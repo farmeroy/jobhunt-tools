@@ -53,11 +53,13 @@ Need career page discovery. Could be manual curation or automated search.
 ## LLM Filter Design
 
 ### Pass 1: Title Filter
-- Batch job titles into a single API call (chunked at 100 titles per call)
+- **Distinct titles** — classifies unique title strings, not individual postings. Results are bulk-applied to all postings with that title
+- **Two-step prompt** — (1) infer target roles from resume, (2) classify titles against those targets. Keeps classification focused and cheaper
+- Batch titles into a single API call (chunked at 100 per call), numeric indices for robust round-tripping
 - Binary classification: relevant vs. irrelevant, using Anthropic tool_use for structured output
-- Uses the candidate's resume as context for relevance judgment
-- Runs on **all unclassified postings** (`title_relevant IS NULL`), not just the current run's fetch — handles backfill from failed runs, newly added companies, etc.
-- Resume changes don't reclassify old postings — only new unclassified ones get the updated context
+- `--reclassify <duration>` re-runs classification on postings within a time period (e.g. `7d`, `2w`)
+- Default run classifies all distinct titles; reclassify mode filters by `first_seen`
+- Token usage tracked per run (input tokens, output tokens, API call count)
 
 ### Pass 2: Content Filter
 - Runs only on jobs that pass the title filter
@@ -101,7 +103,7 @@ The user's resume is loaded once and included in the system prompt for both filt
 
 ### Resume Loading
 
-Resume is loaded via `resume.LoadText(path)`. Supports `.pdf`, `.txt`, and `.md`. PDF text extraction uses pdfcpu (pure Go, no system dependencies). The extracted text is cached in memory for the duration of the run — no re-parsing per call.
+Resume is loaded via `resume.LoadText(path)`. Supports `.pdf`, `.txt`, and `.md`. PDF text extraction uses `pdftotext` (poppler-utils). The extracted text is cached in memory for the duration of the run — no re-parsing per call.
 
 ### Keyword Pre-Filter (at fetch time)
 
@@ -120,8 +122,9 @@ This dramatically reduces volume before any LLM calls. The company list is curat
 ### Design Decisions
 
 - **`run` is the full pipeline** — fetch → classify → (eventually) notify. Designed for unattended cron execution.
-- **Classification runs on all unclassified postings**, not just the current fetch. This handles: failed prior runs, newly added companies, DB re-seeds.
+- **Classification runs on all distinct titles** by default. `--reclassify` re-runs within a time window.
 - **No config file** — flags and env vars are sufficient for now. API key from env, resume path from flag.
+- **Run logs** — each `run` writes a timestamped log file to `.logs/` alongside the DB. All classification results, token usage, and errors are persisted.
 
 ## Project Structure
 
