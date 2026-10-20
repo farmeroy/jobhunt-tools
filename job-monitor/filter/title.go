@@ -22,6 +22,18 @@ type titleResults struct {
 	Results []titleResult `json:"results"`
 }
 
+type Usage struct {
+	InputTokens  int64
+	OutputTokens int64
+	Calls        int
+}
+
+func (u *Usage) add(resp *anthropic.Message) {
+	u.InputTokens += resp.Usage.InputTokens
+	u.OutputTokens += resp.Usage.OutputTokens
+	u.Calls++
+}
+
 var classifyTool = anthropic.ToolParam{
 	Name:        "classify_titles",
 	Description: param.Opt[string]{Value: "Classify job titles as relevant or irrelevant to the candidate's resume"},
@@ -43,16 +55,19 @@ var classifyTool = anthropic.ToolParam{
 	},
 }
 
-func FilterTitles(ctx context.Context, client *anthropic.Client, resumeText string, titles []string) (map[string]bool, error) {
+func FilterTitles(ctx context.Context, client *anthropic.Client, resumeText string, titles []string) (map[string]bool, *Usage, error) {
 	if len(titles) == 0 {
-		return nil, nil
+		return nil, &Usage{}, nil
 	}
 
+	usage := &Usage{}
+
 	log.Printf("  inferring target titles from resume...")
-	targetTitles, err := inferTargetTitles(ctx, client, resumeText)
+	targetTitles, resp, err := inferTargetTitles(ctx, client, resumeText)
 	if err != nil {
-		return nil, fmt.Errorf("infer target titles: %w", err)
+		return nil, nil, fmt.Errorf("infer target titles: %w", err)
 	}
+	usage.add(resp)
 	log.Printf("  target titles:\n%s", targetTitles)
 
 	results := make(map[string]bool, len(titles))
@@ -64,23 +79,35 @@ func FilterTitles(ctx context.Context, client *anthropic.Client, resumeText stri
 		}
 		chunk := titles[i:end]
 
-		chunkResults, err := classifyChunk(ctx, client, resumeText, targetTitles, chunk, i)
+		chunkResults, chunkResp, err := classifyChunk(ctx, client, resumeText, targetTitles, chunk, i)
 		if err != nil {
-			return nil, fmt.Errorf("classify chunk %d-%d: %w", i, end, err)
+			return nil, nil, fmt.Errorf("classify chunk %d-%d: %w", i, end, err)
 		}
+		usage.add(chunkResp)
 		for title, relevant := range chunkResults {
 			results[title] = relevant
+			if relevant {
+				log.Printf("    [relevant] %s", title)
+			} else {
+				log.Printf("    [skip]     %s", title)
+			}
 		}
 
 		missing := findMissing(chunk, chunkResults)
 		if len(missing) > 0 {
 			log.Printf("  retry: model skipped %d titles, retrying", len(missing))
-			retryResults, err := classifyChunk(ctx, client, resumeText, targetTitles, missing, 0)
+			retryResults, retryResp, err := classifyChunk(ctx, client, resumeText, targetTitles, missing, 0)
 			if err != nil {
 				log.Printf("  warning: retry failed: %v", err)
 			} else {
+				usage.add(retryResp)
 				for title, relevant := range retryResults {
 					results[title] = relevant
+					if relevant {
+						log.Printf("    [relevant] %s", title)
+					} else {
+						log.Printf("    [skip]     %s", title)
+					}
 				}
 				stillMissing := findMissing(missing, retryResults)
 				if len(stillMissing) > 0 {
@@ -90,7 +117,7 @@ func FilterTitles(ctx context.Context, client *anthropic.Client, resumeText stri
 		}
 	}
 
-	return results, nil
+	return results, usage, nil
 }
 
 func findMissing(titles []string, results map[string]bool) []string {
@@ -103,7 +130,7 @@ func findMissing(titles []string, results map[string]bool) []string {
 	return missing
 }
 
-func inferTargetTitles(ctx context.Context, client *anthropic.Client, resumeText string) (string, error) {
+func inferTargetTitles(ctx context.Context, client *anthropic.Client, resumeText string) (string, *anthropic.Message, error) {
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.ModelClaudeHaiku4_5,
 		MaxTokens: 1024,
@@ -117,18 +144,18 @@ func inferTargetTitles(ctx context.Context, client *anthropic.Client, resumeText
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("infer target titles: %w", err)
+		return "", nil, fmt.Errorf("infer target titles: %w", err)
 	}
 
 	for _, block := range resp.Content {
 		if block.Type == "text" {
-			return block.Text, nil
+			return block.Text, resp, nil
 		}
 	}
-	return "", fmt.Errorf("no text in response")
+	return "", nil, fmt.Errorf("no text in response")
 }
 
-func classifyChunk(ctx context.Context, client *anthropic.Client, resumeText string, targetTitles string, titles []string, offset int) (map[string]bool, error) {
+func classifyChunk(ctx context.Context, client *anthropic.Client, resumeText string, targetTitles string, titles []string, offset int) (map[string]bool, *anthropic.Message, error) {
 	var listing strings.Builder
 	for i, t := range titles {
 		fmt.Fprintf(&listing, "%d. %s\n", offset+i, t)
@@ -158,10 +185,11 @@ func classifyChunk(ctx context.Context, client *anthropic.Client, resumeText str
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("anthropic api: %w", err)
+		return nil, nil, fmt.Errorf("anthropic api: %w", err)
 	}
 
-	return parseToolUseResponse(resp, titles, offset)
+	results, err := parseToolUseResponse(resp, titles, offset)
+	return results, resp, err
 }
 
 func parseToolUseResponse(resp *anthropic.Message, titles []string, offset int) (map[string]bool, error) {

@@ -3,12 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
 
 	"jobhunt/tools/internal/atsutil"
 	"jobhunt/tools/job-monitor/fetcher"
@@ -31,6 +34,17 @@ var runCmd = &cobra.Command{
 	Short: "Fetch job postings and classify titles for relevance",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
+
+		logDir := filepath.Join(filepath.Dir(dbPath), ".logs")
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			return fmt.Errorf("create log directory: %w", err)
+		}
+		logFile, err := os.Create(filepath.Join(logDir, time.Now().UTC().Format("2006-01-02T150405Z")+".log"))
+		if err != nil {
+			return fmt.Errorf("create log file: %w", err)
+		}
+		defer logFile.Close()
+		log.SetOutput(io.MultiWriter(os.Stderr, logFile))
 
 		// Load resume if provided (required for classification, not for dry-run)
 		var resumeText string
@@ -183,7 +197,7 @@ var runCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Classifying %d unique titles...\n", len(titles))
 
 		llmClient := anthropic.NewClient()
-		classifications, err := filter.FilterTitles(ctx, &llmClient, resumeText, titles)
+		classifications, usage, err := filter.FilterTitles(ctx, &llmClient, resumeText, titles)
 		if err != nil {
 			return fmt.Errorf("title classification: %w", err)
 		}
@@ -205,6 +219,8 @@ var runCmd = &cobra.Command{
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Classified %d unique titles (%d relevant, %d irrelevant), updated %d postings\n",
 			relevant+irrelevant, relevant, irrelevant, postingsUpdated)
+		fmt.Fprintf(cmd.OutOrStdout(), "Token usage: %d input, %d output (%d API calls)\n",
+			usage.InputTokens, usage.OutputTokens, usage.Calls)
 
 		return nil
 	},
