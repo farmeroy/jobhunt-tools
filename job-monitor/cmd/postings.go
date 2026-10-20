@@ -27,10 +27,18 @@ var postingsCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "COMPANY\tTITLE\tURL\tFIRST SEEN")
+		fmt.Fprintln(w, "COMPANY\tTITLE\tRELEVANT\tURL\tFIRST SEEN")
 		for _, p := range postings {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-				p.CompanyName, p.Title, p.URL, p.FirstSeen.Format("2006-01-02"))
+			rel := "-"
+			if p.TitleRelevant != nil {
+				if *p.TitleRelevant {
+					rel = "yes"
+				} else {
+					rel = "no"
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				p.CompanyName, p.Title, rel, p.URL, p.FirstSeen.Format("2006-01-02"))
 		}
 		return w.Flush()
 	},

@@ -53,9 +53,11 @@ Need career page discovery. Could be manual curation or automated search.
 ## LLM Filter Design
 
 ### Pass 1: Title Filter
-- Batch many job titles into a single API call
-- Binary classification: relevant (SWE, backend, fullstack, etc.) vs. irrelevant (marketing, sales, design, etc.)
-- Very cheap — one call per company fetch cycle
+- Batch job titles into a single API call (chunked at 100 titles per call)
+- Binary classification: relevant vs. irrelevant, using Anthropic tool_use for structured output
+- Uses the candidate's resume as context for relevance judgment
+- Runs on **all unclassified postings** (`title_relevant IS NULL`), not just the current run's fetch — handles backfill from failed runs, newly added companies, etc.
+- Resume changes don't reclassify old postings — only new unclassified ones get the updated context
 
 ### Pass 2: Content Filter
 - Runs only on jobs that pass the title filter
@@ -115,9 +117,11 @@ This dramatically reduces volume before any LLM calls. The company list is curat
 - `--resume` flag — path to resume file (PDF, txt, or md)
 - `ANTHROPIC_API_KEY` env var — required for LLM filter commands
 
-### System Dependencies
+### Design Decisions
 
-- `pdftotext` (poppler-utils) — PDF resume text extraction. Install: `apt install poppler-utils`
+- **`run` is the full pipeline** — fetch → classify → (eventually) notify. Designed for unattended cron execution.
+- **Classification runs on all unclassified postings**, not just the current fetch. This handles: failed prior runs, newly added companies, DB re-seeds.
+- **No config file** — flags and env vars are sufficient for now. API key from env, resume path from flag.
 
 ## Project Structure
 
@@ -125,12 +129,12 @@ This dramatically reduces volume before any LLM calls. The company list is curat
 job-monitor/
 ├── main.go
 ├── go.mod
-├── config.yaml
-├── fetcher/        # ATS-specific fetchers (greenhouse.go, ashby.go, lever.go)
-├── store/          # SQLite persistence layer
+├── cmd/            # Cobra CLI commands (run, import, add, remove, list, postings)
+├── fetcher/        # ATS-specific fetchers (greenhouse.go, ashby.go, lever.go) + keyword pre-filter
 ├── filter/         # LLM filtering logic (title + content passes)
-├── notify/         # Notification (email first, extensible)
-└── config/         # Config loading and validation
+├── resume/         # Resume text extraction (PDF via pdfcpu, txt, md)
+├── store/          # SQLite persistence layer
+└── notify/         # Notification (email first, extensible)
 ```
 
 ## Seed Data
