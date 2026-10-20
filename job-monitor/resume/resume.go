@@ -1,15 +1,11 @@
 package resume
 
 import (
-	"bytes"
-	"context"
 	"fmt"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-
-	pdfapi "github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
 func LoadText(path string) (string, error) {
@@ -25,21 +21,11 @@ func LoadText(path string) (string, error) {
 }
 
 func extractPDF(path string) (string, error) {
-	f, err := os.Open(path)
+	out, err := exec.Command("pdftotext", "-layout", path, "-").Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("pdftotext: %w (is poppler-utils installed?)", err)
 	}
-	defer f.Close()
-
-	var buf bytes.Buffer
-	err = pdfapi.ExtractContent(context.Background(), f, nil, func(r io.Reader, pageNr int) error {
-		_, err := io.Copy(&buf, r)
-		return err
-	}, nil)
-	if err != nil {
-		return "", fmt.Errorf("extract pdf text: %w", err)
-	}
-	return strings.TrimSpace(buf.String()), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 func readFile(path string) (string, error) {
