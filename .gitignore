@@ -29,6 +29,7 @@ Thumbs.db
 
 # Output
 matches.txt
+.logs
 
 # Test artifacts
 coverage.out
