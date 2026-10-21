@@ -3,12 +3,14 @@ package filter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
+	"golang.org/x/sync/errgroup"
 )
 
 type ContentPosting struct {
@@ -49,33 +51,65 @@ var scoreTool = anthropic.ToolParam{
 	},
 }
 
-func ScoreContent(ctx context.Context, client *anthropic.Client, resumeText string, allowedLocations []string, postings []ContentPosting) ([]ContentResult, *Usage, error) {
+type ScoreResult struct {
+	Scored []ContentResult
+	Errors int
+}
+
+func ScoreContent(ctx context.Context, client *anthropic.Client, resumeText string, allowedLocations []string, postings []ContentPosting) (*ScoreResult, *Usage, error) {
 	usage := &Usage{}
 
+	var toScore []ContentPosting
 	var skipped int
-	var results []ContentResult
-
 	for _, p := range postings {
 		if p.Description == "" {
 			skipped++
 			continue
 		}
-
-		result, resp, err := scorePosting(ctx, client, resumeText, allowedLocations, p)
-		if err != nil {
-			log.Printf("  error scoring posting %d (%s): %v", p.ID, p.Title, err)
-			continue
-		}
-		usage.add(resp)
-		results = append(results, *result)
-		log.Printf("  [%.0f/10] %s", result.Score, p.Title)
+		toScore = append(toScore, p)
 	}
-
 	if skipped > 0 {
 		log.Printf("  skipped %d postings with empty descriptions", skipped)
 	}
 
-	return results, usage, nil
+	resultsCh := make(chan ContentResult, len(toScore))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(10)
+
+	for _, p := range toScore {
+		g.Go(func() error {
+			result, resp, err := scorePosting(gctx, client, resumeText, allowedLocations, p)
+			if err != nil {
+				var apierr *anthropic.Error
+				if errors.As(err, &apierr) && apierr.StatusCode >= 400 && apierr.StatusCode < 500 && apierr.StatusCode != 429 {
+					return fmt.Errorf("posting %d (%s): %w", p.ID, p.Title, err)
+				}
+				log.Printf("  error scoring posting %d (%s): %v", p.ID, p.Title, err)
+				return nil
+			}
+			usage.add(resp)
+			log.Printf("  [%.0f/10] %s", result.Score, p.Title)
+			resultsCh <- *result
+			return nil
+		})
+	}
+
+	err := g.Wait()
+	close(resultsCh)
+
+	results := make([]ContentResult, 0, len(toScore))
+	for r := range resultsCh {
+		results = append(results, r)
+	}
+
+	if err != nil {
+		return nil, usage, err
+	}
+
+	return &ScoreResult{
+		Scored: results,
+		Errors: len(toScore) - len(results),
+	}, usage, nil
 }
 
 func scorePosting(ctx context.Context, client *anthropic.Client, resumeText string, allowedLocations []string, p ContentPosting) (*ContentResult, *anthropic.Message, error) {

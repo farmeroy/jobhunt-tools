@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync/atomic"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
@@ -25,13 +26,13 @@ type titleResults struct {
 type Usage struct {
 	InputTokens  int64
 	OutputTokens int64
-	Calls        int
+	Calls        int64
 }
 
 func (u *Usage) add(resp *anthropic.Message) {
-	u.InputTokens += resp.Usage.InputTokens
-	u.OutputTokens += resp.Usage.OutputTokens
-	u.Calls++
+	atomic.AddInt64(&u.InputTokens, resp.Usage.InputTokens)
+	atomic.AddInt64(&u.OutputTokens, resp.Usage.OutputTokens)
+	atomic.AddInt64(&u.Calls, 1)
 }
 
 var classifyTool = anthropic.ToolParam{

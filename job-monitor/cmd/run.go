@@ -21,6 +21,7 @@ import (
 	"jobhunt/tools/job-monitor/store"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/spf13/cobra"
 )
 
@@ -200,7 +201,7 @@ var runCmd = &cobra.Command{
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Classifying %d unique titles...\n", len(titles))
 
-		llmClient := anthropic.NewClient()
+		llmClient := anthropic.NewClient(option.WithMaxRetries(5))
 		classifications, usage, err := filter.FilterTitles(ctx, &llmClient, resumeText, titles)
 		if err != nil {
 			return fmt.Errorf("title classification: %w", err)
@@ -234,10 +235,6 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get unscored postings: %w", err)
 		}
-		// TODO: remove this limit after testing content scoring
-		if len(unscored) > 5 {
-			unscored = unscored[:20]
-		}
 		if len(unscored) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "No postings to score")
 			return nil
@@ -257,13 +254,13 @@ var runCmd = &cobra.Command{
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Scoring %d postings against resume...\n", len(unscored))
 
-		scored, contentUsage, err := filter.ScoreContent(ctx, &llmClient, resumeText, allowedLocations, contentPostings)
+		scoreResult, contentUsage, err := filter.ScoreContent(ctx, &llmClient, resumeText, allowedLocations, contentPostings)
 		if err != nil {
 			return fmt.Errorf("content scoring: %w", err)
 		}
 
 		var aboveThreshold int
-		for _, r := range scored {
+		for _, r := range scoreResult.Scored {
 			if err := db.SetContentScore(r.PostingID, r.Score, r.Reasoning); err != nil {
 				log.Printf("  error saving score for posting %d: %v", r.PostingID, err)
 				continue
@@ -274,7 +271,10 @@ var runCmd = &cobra.Command{
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Scored %d postings: %d above threshold (%.0f)\n",
-			len(scored), aboveThreshold, scoreThreshold)
+			len(scoreResult.Scored), aboveThreshold, scoreThreshold)
+		if scoreResult.Errors > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %d postings failed to score\n", scoreResult.Errors)
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Content scoring tokens: %d input, %d output (%d API calls)\n",
 			contentUsage.InputTokens, contentUsage.OutputTokens, contentUsage.Calls)
 
