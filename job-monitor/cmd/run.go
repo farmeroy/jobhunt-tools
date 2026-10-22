@@ -96,7 +96,7 @@ var runCmd = &cobra.Command{
 
 			sem, ok := atsSems[c.ATS]
 			if !ok {
-				sem = make(chan struct{}, 5)
+				sem = make(chan struct{}, 1)
 				atsSems[c.ATS] = sem
 			}
 
