@@ -72,7 +72,7 @@ var runCmd = &cobra.Command{
 		}
 
 		httpClient := atsutil.NewHTTPClient()
-		sem := make(chan struct{}, 5)
+		atsSems := map[string]chan struct{}{}
 
 		type result struct {
 			company  string
@@ -94,8 +94,14 @@ var runCmd = &cobra.Command{
 				continue
 			}
 
+			sem, ok := atsSems[c.ATS]
+			if !ok {
+				sem = make(chan struct{}, 5)
+				atsSems[c.ATS] = sem
+			}
+
 			wg.Add(1)
-			go func(idx int, company store.Company, f fetcher.Fetcher) {
+			go func(idx int, company store.Company, f fetcher.Fetcher, sem chan struct{}) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
@@ -146,7 +152,7 @@ var runCmd = &cobra.Command{
 
 				log.Printf("  %s: %d fetched, %d matched, %d new", company.Name, len(postings), len(matched), newCount)
 				results[idx] = result{company: company.Name, fetched: len(postings), filtered: len(matched), newCount: newCount}
-			}(i, c, f)
+			}(i, c, f, sem)
 		}
 		wg.Wait()
 

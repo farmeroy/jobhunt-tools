@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
+	"time"
 )
 
 var AshbyBaseURL = "https://jobs.ashbyhq.com"
 
-type Ashby struct{}
+type Ashby struct {
+	detailSem chan struct{}
+}
 
 func (a *Ashby) Name() string { return "Ashby" }
 
@@ -81,7 +85,6 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 		}
 	}
 
-	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
 	for i := range postings {
 		if !MatchesTitle(postings[i].Title) || !MatchesLocation(postings[i].Location) {
@@ -90,8 +93,8 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 		wg.Add(1)
 		go func(p *JobPosting) {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			a.detailSem <- struct{}{}
+			defer func() { <-a.detailSem }()
 			desc, err := a.fetchDescription(ctx, client, slug, p.ExternalID)
 			if err != nil {
 				log.Printf("  ashby: %s: description fetch failed for %s: %v", slug, p.Title, err)
@@ -106,7 +109,7 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 }
 
 func (a *Ashby) fetchDescription(ctx context.Context, client *http.Client, slug, postingID string) (string, error) {
-	body, err := json.Marshal(map[string]any{
+	reqBody, err := json.Marshal(map[string]any{
 		"operationName": "ApiJobPosting",
 		"variables": map[string]string{
 			"organizationHostedJobsPageName": slug,
@@ -122,21 +125,65 @@ func (a *Ashby) fetchDescription(ctx context.Context, client *http.Client, slug,
 		return "", err
 	}
 
+	var lastErr error
+	for attempt := range 4 {
+		if attempt > 0 {
+			backoff := time.Duration(1<<(attempt-1)) * time.Second
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		desc, retryAfter, err := a.doDetailRequest(ctx, client, reqBody)
+		if err == nil {
+			return desc, nil
+		}
+		lastErr = err
+
+		if retryAfter == 0 {
+			return "", err
+		}
+		if retryAfter > time.Duration(1<<(attempt))*time.Second {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(retryAfter):
+			}
+		}
+	}
+	return "", lastErr
+}
+
+// doDetailRequest makes one detail API call. Returns (description, retryAfter, error).
+// retryAfter > 0 signals the caller should retry.
+func (a *Ashby) doDetailRequest(ctx context.Context, client *http.Client, reqBody []byte) (string, time.Duration, error) {
 	url := AshbyBaseURL + "/api/non-user-graphql?op=ApiJobPosting"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+		var retryAfter time.Duration
+		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			if secs, err := strconv.Atoi(ra); err == nil {
+				retryAfter = time.Duration(secs) * time.Second
+			}
+		}
+		return "", retryAfter + 1, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("status %d", resp.StatusCode)
+		return "", 0, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -150,11 +197,11 @@ func (a *Ashby) fetchDescription(ctx context.Context, client *http.Client, slug,
 		} `json:"errors"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode: %w", err)
+		return "", 0, fmt.Errorf("decode: %w", err)
 	}
 	if len(result.Errors) > 0 {
-		return "", fmt.Errorf("graphql: %s", result.Errors[0].Message)
+		return "", 0, fmt.Errorf("graphql: %s", result.Errors[0].Message)
 	}
 
-	return result.Data.JobPosting.DescriptionHtml, nil
+	return result.Data.JobPosting.DescriptionHtml, 0, nil
 }

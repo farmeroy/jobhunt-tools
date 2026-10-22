@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -188,7 +189,7 @@ func TestAshbyFetch(t *testing.T) {
 	AshbyBaseURL = srv.URL
 	defer func() { AshbyBaseURL = old }()
 
-	postings, err := (&Ashby{}).Fetch(context.Background(), srv.Client(), "testco")
+	postings, err := (&Ashby{detailSem: make(chan struct{}, 5)}).Fetch(context.Background(), srv.Client(), "testco")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,9 +227,63 @@ func TestAshbyGraphQLError(t *testing.T) {
 	AshbyBaseURL = srv.URL
 	defer func() { AshbyBaseURL = old }()
 
-	_, err := (&Ashby{}).Fetch(context.Background(), srv.Client(), "bad")
+	_, err := (&Ashby{detailSem: make(chan struct{}, 5)}).Fetch(context.Background(), srv.Client(), "bad")
 	if err == nil {
 		t.Fatal("expected error for graphql error response")
+	}
+}
+
+func TestAshbyFetchRetry(t *testing.T) {
+	var detailCalls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			OperationName string            `json:"operationName"`
+			Variables     map[string]string `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		switch req.OperationName {
+		case "ApiJobBoardWithTeams":
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"jobBoard": map[string]any{
+						"jobPostings": []map[string]any{
+							{"id": "uuid-1", "title": "Software Engineer", "locationName": "Remote"},
+						},
+					},
+				},
+			})
+		case "ApiJobPosting":
+			n := detailCalls.Add(1)
+			if n <= 2 {
+				w.WriteHeader(429)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"jobPosting": map[string]any{
+						"descriptionHtml": "<p>Got it on retry</p>",
+					},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	old := AshbyBaseURL
+	AshbyBaseURL = srv.URL
+	defer func() { AshbyBaseURL = old }()
+
+	postings, err := (&Ashby{detailSem: make(chan struct{}, 5)}).Fetch(context.Background(), srv.Client(), "testco")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if postings[0].Description != "<p>Got it on retry</p>" {
+		t.Errorf("expected description after retry, got %q", postings[0].Description)
+	}
+	if detailCalls.Load() != 3 {
+		t.Errorf("expected 3 detail calls (2 retries + 1 success), got %d", detailCalls.Load())
 	}
 }
 

@@ -21,7 +21,7 @@ type Fetcher interface {
 var fetchers = map[string]Fetcher{
 	"Greenhouse": &Greenhouse{},
 	"Lever":      &Lever{},
-	"Ashby":      &Ashby{},
+	"Ashby":      &Ashby{detailSem: make(chan struct{}, 5)},
 }
 
 func ForProvider(ats string) (Fetcher, bool) {
