@@ -5,18 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 )
 
 var AshbyBaseURL = "https://jobs.ashbyhq.com"
 
-type Ashby struct {
-	detailSem chan struct{}
-}
+type Ashby struct{}
 
 func (a *Ashby) Name() string { return "Ashby" }
 
@@ -36,21 +34,9 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 		return nil, err
 	}
 
-	url := AshbyBaseURL + "/api/non-user-graphql?op=ApiJobBoardWithTeams"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	respBody, err := ashbyPost(ctx, client, "ApiJobBoardWithTeams", body)
 	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("ashby: %s returned %d", slug, resp.StatusCode)
+		return nil, fmt.Errorf("ashby: %s: %w", slug, err)
 	}
 
 	var result struct {
@@ -67,7 +53,7 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("ashby: decode: %w", err)
 	}
 	if len(result.Errors) > 0 {
@@ -85,25 +71,17 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 		}
 	}
 
-	var wg sync.WaitGroup
 	for i := range postings {
 		if !MatchesTitle(postings[i].Title) || !MatchesLocation(postings[i].Location) {
 			continue
 		}
-		wg.Add(1)
-		go func(p *JobPosting) {
-			defer wg.Done()
-			a.detailSem <- struct{}{}
-			defer func() { <-a.detailSem }()
-			desc, err := a.fetchDescription(ctx, client, slug, p.ExternalID)
-			if err != nil {
-				log.Printf("  ashby: %s: description fetch failed for %s: %v", slug, p.Title, err)
-				return
-			}
-			p.Description = desc
-		}(&postings[i])
+		desc, err := a.fetchDescription(ctx, client, slug, postings[i].ExternalID)
+		if err != nil {
+			log.Printf("  ashby: %s: description fetch failed for %s: %v", slug, postings[i].Title, err)
+			continue
+		}
+		postings[i].Description = desc
 	}
-	wg.Wait()
 
 	return postings, nil
 }
@@ -125,65 +103,9 @@ func (a *Ashby) fetchDescription(ctx context.Context, client *http.Client, slug,
 		return "", err
 	}
 
-	var lastErr error
-	for attempt := range 4 {
-		if attempt > 0 {
-			backoff := time.Duration(1<<(attempt-1)) * time.Second
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-
-		desc, retryAfter, err := a.doDetailRequest(ctx, client, reqBody)
-		if err == nil {
-			return desc, nil
-		}
-		lastErr = err
-
-		if retryAfter == 0 {
-			return "", err
-		}
-		if retryAfter > time.Duration(1<<(attempt))*time.Second {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(retryAfter):
-			}
-		}
-	}
-	return "", lastErr
-}
-
-// doDetailRequest makes one detail API call. Returns (description, retryAfter, error).
-// retryAfter > 0 signals the caller should retry.
-func (a *Ashby) doDetailRequest(ctx context.Context, client *http.Client, reqBody []byte) (string, time.Duration, error) {
-	url := AshbyBaseURL + "/api/non-user-graphql?op=ApiJobPosting"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+	respBody, err := ashbyPost(ctx, client, "ApiJobPosting", reqBody)
 	if err != nil {
-		return "", 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-		var retryAfter time.Duration
-		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			if secs, err := strconv.Atoi(ra); err == nil {
-				retryAfter = time.Duration(secs) * time.Second
-			}
-		}
-		return "", retryAfter + 1, fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	if resp.StatusCode != 200 {
-		return "", 0, fmt.Errorf("status %d", resp.StatusCode)
+		return "", err
 	}
 
 	var result struct {
@@ -196,12 +118,70 @@ func (a *Ashby) doDetailRequest(ctx context.Context, client *http.Client, reqBod
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", 0, fmt.Errorf("decode: %w", err)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode: %w", err)
 	}
 	if len(result.Errors) > 0 {
-		return "", 0, fmt.Errorf("graphql: %s", result.Errors[0].Message)
+		return "", fmt.Errorf("graphql: %s", result.Errors[0].Message)
 	}
 
-	return result.Data.JobPosting.DescriptionHtml, 0, nil
+	return result.Data.JobPosting.DescriptionHtml, nil
+}
+
+// ashbyPost makes a POST to the Ashby GraphQL API with retry on 429/5xx.
+func ashbyPost(ctx context.Context, client *http.Client, op string, body []byte) ([]byte, error) {
+	url := AshbyBaseURL + "/api/non-user-graphql?op=" + op
+
+	var lastErr error
+	for attempt := range 4 {
+		if attempt > 0 {
+			backoff := time.Duration(1<<(attempt-1)) * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read body: %w", err)
+		}
+
+		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("status %d", resp.StatusCode)
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if secs, err := strconv.Atoi(ra); err == nil {
+					extra := time.Duration(secs) * time.Second
+					if extra > time.Duration(1<<attempt)*time.Second {
+						select {
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						case <-time.After(extra):
+						}
+					}
+				}
+			}
+			continue
+		}
+
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("status %d", resp.StatusCode)
+		}
+
+		return respBody, nil
+	}
+	return nil, lastErr
 }

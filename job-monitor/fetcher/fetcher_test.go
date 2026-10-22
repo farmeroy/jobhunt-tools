@@ -189,7 +189,7 @@ func TestAshbyFetch(t *testing.T) {
 	AshbyBaseURL = srv.URL
 	defer func() { AshbyBaseURL = old }()
 
-	postings, err := (&Ashby{detailSem: make(chan struct{}, 5)}).Fetch(context.Background(), srv.Client(), "testco")
+	postings, err := (&Ashby{}).Fetch(context.Background(), srv.Client(), "testco")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,13 +227,13 @@ func TestAshbyGraphQLError(t *testing.T) {
 	AshbyBaseURL = srv.URL
 	defer func() { AshbyBaseURL = old }()
 
-	_, err := (&Ashby{detailSem: make(chan struct{}, 5)}).Fetch(context.Background(), srv.Client(), "bad")
+	_, err := (&Ashby{}).Fetch(context.Background(), srv.Client(), "bad")
 	if err == nil {
 		t.Fatal("expected error for graphql error response")
 	}
 }
 
-func TestAshbyFetchRetry(t *testing.T) {
+func TestAshbyFetchRetryDetail(t *testing.T) {
 	var detailCalls atomic.Int32
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +275,7 @@ func TestAshbyFetchRetry(t *testing.T) {
 	AshbyBaseURL = srv.URL
 	defer func() { AshbyBaseURL = old }()
 
-	postings, err := (&Ashby{detailSem: make(chan struct{}, 5)}).Fetch(context.Background(), srv.Client(), "testco")
+	postings, err := (&Ashby{}).Fetch(context.Background(), srv.Client(), "testco")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,6 +284,60 @@ func TestAshbyFetchRetry(t *testing.T) {
 	}
 	if detailCalls.Load() != 3 {
 		t.Errorf("expected 3 detail calls (2 retries + 1 success), got %d", detailCalls.Load())
+	}
+}
+
+func TestAshbyFetchRetryListing(t *testing.T) {
+	var listCalls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			OperationName string            `json:"operationName"`
+			Variables     map[string]string `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		switch req.OperationName {
+		case "ApiJobBoardWithTeams":
+			n := listCalls.Add(1)
+			if n <= 2 {
+				w.WriteHeader(429)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"jobBoard": map[string]any{
+						"jobPostings": []map[string]any{
+							{"id": "uuid-1", "title": "Software Engineer", "locationName": "Remote"},
+						},
+					},
+				},
+			})
+		case "ApiJobPosting":
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"jobPosting": map[string]any{
+						"descriptionHtml": "<p>Description</p>",
+					},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	old := AshbyBaseURL
+	AshbyBaseURL = srv.URL
+	defer func() { AshbyBaseURL = old }()
+
+	postings, err := (&Ashby{}).Fetch(context.Background(), srv.Client(), "testco")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(postings) != 1 {
+		t.Fatalf("expected 1 posting after listing retry, got %d", len(postings))
+	}
+	if listCalls.Load() != 3 {
+		t.Errorf("expected 3 listing calls (2 retries + 1 success), got %d", listCalls.Load())
 	}
 }
 
