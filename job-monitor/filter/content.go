@@ -21,14 +21,32 @@ type ContentPosting struct {
 }
 
 type ContentResult struct {
-	PostingID int64
-	Score     float64
-	Reasoning string
+	PostingID    int64
+	Score        float64
+	Met          []string
+	Unmet        []string
+	Dealbreakers []string
+}
+
+func (r ContentResult) FormatReasoning() string {
+	var parts []string
+	for _, s := range r.Met {
+		parts = append(parts, "+ "+s)
+	}
+	for _, s := range r.Unmet {
+		parts = append(parts, "- "+s)
+	}
+	for _, s := range r.Dealbreakers {
+		parts = append(parts, "! "+s)
+	}
+	return strings.Join(parts, " | ")
 }
 
 type scoreOutput struct {
-	Score     int    `json:"score"`
-	Reasoning string `json:"reasoning"`
+	Score        int      `json:"score"`
+	Met          []string `json:"met"`
+	Unmet        []string `json:"unmet"`
+	Dealbreakers []string `json:"dealbreakers"`
 }
 
 var scoreTool = anthropic.ToolParam{
@@ -38,16 +56,27 @@ var scoreTool = anthropic.ToolParam{
 		Properties: map[string]any{
 			"score": map[string]any{
 				"type":        "integer",
-				"description": "1-10 confidence that you would pass this candidate to the hiring manager. 1 = no fit, 10 = perfect fit.",
+				"description": "1-10 likelihood the candidate gets an interview. 9-10: meets all key requirements. 7-8: most requirements met, minor gaps. 4-6: mixed fit. 1-3: has a dealbreaker.",
 				"minimum":     1,
 				"maximum":     10,
 			},
-			"reasoning": map[string]any{
-				"type":        "string",
-				"description": "Brief reasoning: key requirements met and unmet.",
+			"met": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Key requirements the candidate meets. Each item: one requirement, brief evidence.",
+			},
+			"unmet": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Key requirements the candidate does not meet. Each item: one requirement.",
+			},
+			"dealbreakers": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Hard blockers that should force score to 3 or below: location mismatch, experience gap >2 years below minimum, missing a skill the role lists as required.",
 			},
 		},
-		Required: []string{"score", "reasoning"},
+		Required: []string{"score", "met", "unmet", "dealbreakers"},
 	},
 }
 
@@ -124,10 +153,27 @@ func scorePosting(ctx context.Context, client *anthropic.Client, resumeText stri
 	}
 
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeHaiku4_5,
+		Model:     anthropic.ModelClaudeHaiku5_5,
 		MaxTokens: 1024,
 		System: []anthropic.TextBlockParam{
-			{Text: fmt.Sprintf("You are a recruiter screening candidates for the following role:\n\nTitle: %s%s\n\nJob Description:\n%s\n\nYou are thorough and slightly skeptical. You look for concrete evidence of fit, not just keyword overlap.%s", p.Title, postingLocation, p.Description, locationConstraint)},
+			{Text: fmt.Sprintf(`You are screening whether a candidate would realistically get an interview for this role.
+
+Title: %s%s
+
+Job Description:
+%s
+
+Scoring guide:
+- 9-10: Meets all key requirements, no dealbreakers
+- 7-8: Meets most requirements, minor gaps that would not block an interview
+- 4-6: Mixed fit — some requirements met but notable gaps
+- 1-3: Has a dealbreaker (location, experience level, missing core required skill)
+
+Rules:
+- A "nice to have" or "bonus" skill is never a dealbreaker
+- Experience gap >2 years below the stated minimum is a dealbreaker
+- "Or equivalent experience" means degree is not a dealbreaker
+- Look for concrete evidence of fit, not keyword overlap%s`, p.Title, postingLocation, p.Description, locationConstraint)},
 		},
 		Messages: []anthropic.MessageParam{
 			{
@@ -161,9 +207,11 @@ func scorePosting(ctx context.Context, client *anthropic.Client, resumeText stri
 		}
 
 		return &ContentResult{
-			PostingID: p.ID,
-			Score:     float64(out.Score),
-			Reasoning: out.Reasoning,
+			PostingID:    p.ID,
+			Score:        float64(out.Score),
+			Met:          out.Met,
+			Unmet:        out.Unmet,
+			Dealbreakers: out.Dealbreakers,
 		}, resp, nil
 	}
 

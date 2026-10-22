@@ -261,7 +261,7 @@ var runCmd = &cobra.Command{
 
 		var aboveThreshold int
 		for _, r := range scoreResult.Scored {
-			if err := db.SetContentScore(r.PostingID, r.Score, r.Reasoning); err != nil {
+			if err := db.SetContentScore(r.PostingID, r.Score, r.FormatReasoning()); err != nil {
 				log.Printf("  error saving score for posting %d: %v", r.PostingID, err)
 				continue
 			}
