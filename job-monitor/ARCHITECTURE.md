@@ -67,6 +67,10 @@ Need career page discovery. Could be manual curation or automated search.
 - Returns: match score, reasoning, key requirements met/unmet
 - One call per job posting (still cheap — only a fraction of total postings reach this stage)
 
+## Schema Migrations
+
+Schema is managed with [goose](https://github.com/pressly/goose) (`pressly/goose/v3`). SQL migration files live in `store/*.sql` and are embedded into the binary via `//go:embed`. Migrations run automatically on `store.Open()` using goose's `NewProvider` API. To add a new migration, create `store/NNN_description.sql` with `-- +goose Up` / `-- +goose Down` annotations.
+
 ## Data Model (SQLite)
 
 SQLite is the single source of truth for both companies and postings. The existing `companies.csv` is imported once as a seed; after that, companies are managed through the CLI/database.

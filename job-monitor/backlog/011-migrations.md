@@ -1,18 +1,18 @@
 ---
 title: Migrations and query layer
-status: todo
+status: partial
 story: "2"
 ---
 
 Replace the handrolled store layer with versioned migrations and a proper query tool.
 
-## Migrations
+## Migrations — done
 
-Replace the single CREATE TABLE IF NOT EXISTS with versioned migrations using goose or golang-migrate.
+Replaced the single `CREATE TABLE IF NOT EXISTS` with goose (`pressly/goose/v3`). SQL migration files live in `store/*.sql`, embedded via `//go:embed`. `NewProvider` API (concurrency-safe, no global state). Existing databases pick up migration 001 idempotently.
 
-- [ ] Pick library (goose or golang-migrate)
-- [ ] Convert existing schema to migration 001
-- [ ] Run migrations on Open()
+- [x] Pick library → goose
+- [x] Convert existing schema to migration 001
+- [x] Run migrations on Open()
 
 ## Query layer
 

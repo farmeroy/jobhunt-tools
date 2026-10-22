@@ -1,9 +1,11 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/pressly/goose/v3"
 )
 
 type Store struct {
@@ -28,6 +30,10 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(schemaSQL)
+	provider, err := goose.NewProvider(goose.DialectSQLite3, s.db, migrations)
+	if err != nil {
+		return err
+	}
+	_, err = provider.Up(context.Background())
 	return err
 }
