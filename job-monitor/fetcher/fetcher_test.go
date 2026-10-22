@@ -140,25 +140,47 @@ func TestLeverNotFound(t *testing.T) {
 }
 
 func TestAshbyFetch(t *testing.T) {
+	descriptions := map[string]string{
+		"uuid-1": "<p>Build full stack apps</p>",
+	}
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{
-				"jobBoard": map[string]any{
-					"jobPostings": []map[string]any{
-						{
-							"id":           "uuid-1",
-							"title":        "Full Stack Engineer",
-							"locationName": "Remote",
-						},
-						{
-							"id":           "uuid-2",
-							"title":        "Data Scientist",
-							"locationName": "NYC",
+		var req struct {
+			OperationName string         `json:"operationName"`
+			Variables     map[string]string `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		switch req.OperationName {
+		case "ApiJobBoardWithTeams":
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"jobBoard": map[string]any{
+						"jobPostings": []map[string]any{
+							{
+								"id":           "uuid-1",
+								"title":        "Full Stack Engineer",
+								"locationName": "Remote",
+							},
+							{
+								"id":           "uuid-2",
+								"title":        "Data Scientist",
+								"locationName": "NYC",
+							},
 						},
 					},
 				},
-			},
-		})
+			})
+		case "ApiJobPosting":
+			id := req.Variables["jobPostingId"]
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"jobPosting": map[string]any{
+						"descriptionHtml": descriptions[id],
+					},
+				},
+			})
+		}
 	}))
 	defer srv.Close()
 
@@ -181,6 +203,12 @@ func TestAshbyFetch(t *testing.T) {
 	}
 	if postings[0].URL != srv.URL+"/testco/uuid-1" {
 		t.Errorf("unexpected URL: %s", postings[0].URL)
+	}
+	if postings[0].Description != "<p>Build full stack apps</p>" {
+		t.Errorf("expected description for matched posting, got %q", postings[0].Description)
+	}
+	if postings[1].Description != "" {
+		t.Errorf("expected empty description for non-engineer posting, got %q", postings[1].Description)
 	}
 }
 

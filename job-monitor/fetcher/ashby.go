@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"sync"
 )
 
 var AshbyBaseURL = "https://jobs.ashbyhq.com"
@@ -78,5 +80,81 @@ func (a *Ashby) Fetch(ctx context.Context, client *http.Client, slug string) ([]
 			Location:   j.LocationName,
 		}
 	}
+
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+	for i := range postings {
+		if !MatchesTitle(postings[i].Title) || !MatchesLocation(postings[i].Location) {
+			continue
+		}
+		wg.Add(1)
+		go func(p *JobPosting) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			desc, err := a.fetchDescription(ctx, client, slug, p.ExternalID)
+			if err != nil {
+				log.Printf("  ashby: %s: description fetch failed for %s: %v", slug, p.Title, err)
+				return
+			}
+			p.Description = desc
+		}(&postings[i])
+	}
+	wg.Wait()
+
 	return postings, nil
+}
+
+func (a *Ashby) fetchDescription(ctx context.Context, client *http.Client, slug, postingID string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"operationName": "ApiJobPosting",
+		"variables": map[string]string{
+			"organizationHostedJobsPageName": slug,
+			"jobPostingId":                   postingID,
+		},
+		"query": `query ApiJobPosting($organizationHostedJobsPageName: String!, $jobPostingId: String!) {
+			jobPosting(organizationHostedJobsPageName: $organizationHostedJobsPageName, jobPostingId: $jobPostingId) {
+				descriptionHtml
+			}
+		}`,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	url := AshbyBaseURL + "/api/non-user-graphql?op=ApiJobPosting"
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data struct {
+			JobPosting struct {
+				DescriptionHtml string `json:"descriptionHtml"`
+			} `json:"jobPosting"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode: %w", err)
+	}
+	if len(result.Errors) > 0 {
+		return "", fmt.Errorf("graphql: %s", result.Errors[0].Message)
+	}
+
+	return result.Data.JobPosting.DescriptionHtml, nil
 }
