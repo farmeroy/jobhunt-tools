@@ -228,6 +228,118 @@ func TestMarkNotified(t *testing.T) {
 	}
 }
 
+func TestGetDistinctTitlesOnlyUnclassified(t *testing.T) {
+	s := openTestStore(t)
+	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")
+
+	s.UpsertPostings(coID, []Posting{
+		{ExternalID: "1", Title: "Engineer"},
+		{ExternalID: "2", Title: "Designer"},
+		{ExternalID: "3", Title: "Manager"},
+	})
+
+	all, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
+	s.SetTitleRelevance(all[0].ID, true)
+	s.SetTitleRelevance(all[1].ID, false)
+
+	titles, err := s.GetDistinctTitles(time.Time{})
+	if err != nil {
+		t.Fatalf("GetDistinctTitles: %v", err)
+	}
+	if len(titles) != 1 {
+		t.Fatalf("expected 1 unclassified title, got %d: %v", len(titles), titles)
+	}
+	if titles[0] != "Manager" {
+		t.Errorf("expected 'Manager', got %q", titles[0])
+	}
+}
+
+func TestGetDistinctTitlesReclassifyReturnsSince(t *testing.T) {
+	s := openTestStore(t)
+	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")
+
+	s.UpsertPostings(coID, []Posting{
+		{ExternalID: "1", Title: "Engineer"},
+		{ExternalID: "2", Title: "Designer"},
+	})
+
+	all, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
+	s.SetTitleRelevance(all[0].ID, true)
+	s.SetTitleRelevance(all[1].ID, false)
+
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	titles, err := s.GetDistinctTitles(since)
+	if err != nil {
+		t.Fatalf("GetDistinctTitles with since: %v", err)
+	}
+	if len(titles) != 2 {
+		t.Fatalf("expected 2 titles (reclassify ignores classification status), got %d: %v", len(titles), titles)
+	}
+}
+
+func TestRescoreClearsNotified(t *testing.T) {
+	s := openTestStore(t)
+	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")
+
+	s.UpsertPostings(coID, []Posting{{ExternalID: "1", Title: "Engineer"}})
+	postings, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
+	id := postings[0].ID
+
+	s.SetTitleRelevance(id, true)
+	s.SetContentScore(id, 8.0, "Good", false)
+	s.MarkNotified([]int64{id})
+
+	// Verify it's notified and excluded from unnotified matches
+	matches, _ := s.ListPostings(PostingFilter{ContentScoreMin: Float64Ptr(6.0), Notified: BoolPtr(false)})
+	if len(matches) != 0 {
+		t.Fatalf("expected 0 unnotified before rescore, got %d", len(matches))
+	}
+
+	// Rescore with clearNotified=true
+	s.SetContentScore(id, 9.0, "Better", true)
+
+	matches, _ = s.ListPostings(PostingFilter{ContentScoreMin: Float64Ptr(6.0), Notified: BoolPtr(false)})
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 unnotified after rescore, got %d", len(matches))
+	}
+	if *matches[0].ContentScore != 9.0 {
+		t.Errorf("expected score 9.0, got %f", *matches[0].ContentScore)
+	}
+}
+
+func TestScoredSinceFilterIncludesRecentlyScored(t *testing.T) {
+	s := openTestStore(t)
+	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")
+
+	s.UpsertPostings(coID, []Posting{
+		{ExternalID: "1", Title: "Engineer"},
+		{ExternalID: "2", Title: "Designer"},
+		{ExternalID: "3", Title: "Manager"},
+	})
+
+	all, _ := s.ListPostings(PostingFilter{TitleUnclassified: true})
+	for _, p := range all {
+		s.SetTitleRelevance(p.ID, true)
+	}
+
+	// Score two postings
+	s.SetContentScore(all[0].ID, 8.0, "Good", false)
+	s.SetContentScore(all[1].ID, 5.0, "Meh", false)
+
+	// Unscored filter should return only the unscored one
+	unscored, _ := s.ListPostings(PostingFilter{TitleRelevant: BoolPtr(true), Unscored: true})
+	if len(unscored) != 1 {
+		t.Fatalf("expected 1 unscored, got %d", len(unscored))
+	}
+
+	// ScoredSince with a time before scoring should return all 3
+	since := time.Now().UTC().Add(-1 * time.Hour)
+	reclassify, _ := s.ListPostings(PostingFilter{TitleRelevant: BoolPtr(true), ScoredSince: &since})
+	if len(reclassify) != 3 {
+		t.Fatalf("expected 3 with ScoredSince (1 unscored + 2 recently scored), got %d", len(reclassify))
+	}
+}
+
 func TestListPostingsTitlePassedUnscored(t *testing.T) {
 	s := openTestStore(t)
 	coID, _ := s.AddCompany("Airbnb", "airbnb", "greenhouse")

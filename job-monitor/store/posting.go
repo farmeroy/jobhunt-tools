@@ -135,6 +135,8 @@ func (s *Store) GetDistinctTitles(since time.Time) ([]string, error) {
 	if !since.IsZero() {
 		query += ` WHERE first_seen >= ?`
 		args = append(args, since)
+	} else {
+		query += ` WHERE title_relevant IS NULL`
 	}
 
 	query += ` ORDER BY title`
