@@ -1,6 +1,6 @@
 ---
 title: Retry content scoring on malformed LLM responses
-status: todo
+status: done
 story: "2"
 ---
 
@@ -10,5 +10,13 @@ A second attempt usually gets valid output, so these postings are silently dropp
 
 ## Tasks
 
-- [ ] Add retry loop around `scorePosting` for non-API errors (e.g. JSON parse failures)
-- [ ] Cap retries (2-3 attempts) to avoid infinite loops on consistently bad responses
+- [x] Add retry loop around `scorePosting` for non-API errors (e.g. JSON parse failures)
+- [x] Cap retries (3 attempts) to avoid infinite loops on consistently bad responses
+
+## Commits
+
+- 187a903 fix: retry content scoring on malformed LLM responses
+
+## Notes
+
+- At 112 concurrent scoring calls with 10-wide parallelism, we're hitting ~88% of the Haiku rate limit. Retries add marginal load but could push over during large initial loads. Not a concern for steady-state runs.

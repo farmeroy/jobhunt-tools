@@ -107,18 +107,26 @@ func ScoreContent(ctx context.Context, client *anthropic.Client, resumeText stri
 
 	for _, p := range toScore {
 		g.Go(func() error {
-			result, resp, err := scorePosting(gctx, client, resumeText, allowedLocations, p)
-			if err != nil {
-				var apierr *anthropic.Error
-				if errors.As(err, &apierr) && apierr.StatusCode >= 400 && apierr.StatusCode < 500 && apierr.StatusCode != 429 {
-					return fmt.Errorf("posting %d (%s): %w", p.ID, p.Title, err)
+			const maxAttempts = 3
+			for attempt := range maxAttempts {
+				result, resp, err := scorePosting(gctx, client, resumeText, allowedLocations, p)
+				if err != nil {
+					var apierr *anthropic.Error
+					if errors.As(err, &apierr) && apierr.StatusCode >= 400 && apierr.StatusCode < 500 && apierr.StatusCode != 429 {
+						return fmt.Errorf("posting %d (%s): %w", p.ID, p.Title, err)
+					}
+					if attempt < maxAttempts-1 {
+						log.Printf("  retry scoring posting %d (%s) (attempt %d): %v", p.ID, p.Title, attempt+1, err)
+						continue
+					}
+					log.Printf("  error scoring posting %d (%s): %v", p.ID, p.Title, err)
+					return nil
 				}
-				log.Printf("  error scoring posting %d (%s): %v", p.ID, p.Title, err)
+				usage.add(resp)
+				log.Printf("  [%.0f/10] %s", result.Score, p.Title)
+				resultsCh <- *result
 				return nil
 			}
-			usage.add(resp)
-			log.Printf("  [%.0f/10] %s", result.Score, p.Title)
-			resultsCh <- *result
 			return nil
 		})
 	}

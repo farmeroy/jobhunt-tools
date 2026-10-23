@@ -15,3 +15,7 @@ Replace with a `scored_on` timestamp column so the content scoring query can fil
 - [x] Replace `PostingFilter.Scored *bool` with `Unscored bool` + `ScoredSince *time.Time`
 - [x] When `--reclassify` is set, pass `since` to the content scoring filter so it rescores postings scored within that window
 - [x] Clear `notified_at` on rescored postings so they flow through to matches again
+
+## Commits
+
+- 303096d feat: replace Scored boolean with scored_on timestamp for reclassify support
