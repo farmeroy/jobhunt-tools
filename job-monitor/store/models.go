@@ -25,6 +25,7 @@ type Posting struct {
 	TitleRelevant    *bool
 	ContentScore     *float64
 	ContentReasoning *string
+	ScoredOn         *time.Time
 	NotifiedAt       *time.Time
 	AppliedAt        *time.Time
 }

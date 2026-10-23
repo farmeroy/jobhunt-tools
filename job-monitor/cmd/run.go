@@ -234,10 +234,14 @@ var runCmd = &cobra.Command{
 			usage.InputTokens, usage.OutputTokens, usage.Calls)
 
 		// --- Content scoring phase ---
-		unscored, err := db.ListPostings(store.PostingFilter{
+		scoreFilter := store.PostingFilter{
 			TitleRelevant: store.BoolPtr(true),
-			Scored:        store.BoolPtr(false),
-		})
+			Unscored:      true,
+		}
+		if !since.IsZero() {
+			scoreFilter.ScoredSince = &since
+		}
+		unscored, err := db.ListPostings(scoreFilter)
 		if err != nil {
 			return fmt.Errorf("get unscored postings: %w", err)
 		}
@@ -267,7 +271,7 @@ var runCmd = &cobra.Command{
 
 		var aboveThreshold int
 		for _, r := range scoreResult.Scored {
-			if err := db.SetContentScore(r.PostingID, r.Score, r.FormatReasoning()); err != nil {
+			if err := db.SetContentScore(r.PostingID, r.Score, r.FormatReasoning(), !since.IsZero()); err != nil {
 				log.Printf("  error saving score for posting %d: %v", r.PostingID, err)
 				continue
 			}

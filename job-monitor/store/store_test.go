@@ -187,7 +187,7 @@ func TestSetContentScoreAndGetUnnotified(t *testing.T) {
 	id := postings[0].ID
 
 	s.SetTitleRelevance(id, true)
-	s.SetContentScore(id, 8.5, "Great match")
+	s.SetContentScore(id, 8.5, "Great match", false)
 
 	matches, err := s.ListPostings(PostingFilter{ContentScoreMin: Float64Ptr(6.0), Notified: BoolPtr(false)})
 	if err != nil {
@@ -210,7 +210,7 @@ func TestMarkNotified(t *testing.T) {
 	id := postings[0].ID
 
 	s.SetTitleRelevance(id, true)
-	s.SetContentScore(id, 8.0, "Good")
+	s.SetContentScore(id, 8.0, "Good", false)
 
 	if err := s.MarkNotified([]int64{id}); err != nil {
 		t.Fatalf("MarkNotified: %v", err)
@@ -241,7 +241,7 @@ func TestListPostingsTitlePassedUnscored(t *testing.T) {
 	s.SetTitleRelevance(all[0].ID, true)
 	s.SetTitleRelevance(all[1].ID, false)
 
-	unscored, err := s.ListPostings(PostingFilter{TitleRelevant: BoolPtr(true), Scored: BoolPtr(false)})
+	unscored, err := s.ListPostings(PostingFilter{TitleRelevant: BoolPtr(true), Unscored: true})
 	if err != nil {
 		t.Fatalf("ListPostings title-passed unscored: %v", err)
 	}

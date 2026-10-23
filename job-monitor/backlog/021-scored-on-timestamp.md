@@ -1,6 +1,6 @@
 ---
 title: Replace Scored boolean filter with scored_on timestamp
-status: todo
+status: done
 story: "2"
 ---
 
@@ -10,7 +10,8 @@ Replace with a `scored_on` timestamp column so the content scoring query can fil
 
 ## Tasks
 
-- [ ] Add `scored_on DATETIME` column to postings (migration)
-- [ ] Populate `scored_on` in `SetContentScore`
-- [ ] Replace `PostingFilter.Scored *bool` with a `ScoredBefore *time.Time` filter (or similar)
-- [ ] When `--reclassify` is set, pass `since` to the content scoring filter so it rescores postings scored before that window
+- [x] Add `scored_on DATETIME` column to postings (migration)
+- [x] Populate `scored_on` in `SetContentScore`
+- [x] Replace `PostingFilter.Scored *bool` with `Unscored bool` + `ScoredSince *time.Time`
+- [x] When `--reclassify` is set, pass `since` to the content scoring filter so it rescores postings scored within that window
+- [x] Clear `notified_at` on rescored postings so they flow through to matches again

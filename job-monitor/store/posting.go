@@ -74,7 +74,8 @@ type PostingFilter struct {
 	Company           string
 	TitleUnclassified bool
 	TitleRelevant     *bool
-	Scored            *bool
+	Unscored          bool
+	ScoredSince       *time.Time
 	ContentScoreMin   *float64
 	Notified          *bool
 	OrderBy           PostingOrder
@@ -83,7 +84,7 @@ type PostingFilter struct {
 func (s *Store) ListPostings(f PostingFilter) ([]Posting, error) {
 	query := `SELECT p.id, p.company_id, c.name, p.external_id, p.title, p.url, p.location, p.description,
 		p.first_seen, p.last_seen, p.title_relevant, p.content_score, p.content_reasoning,
-		p.notified_at, p.applied_at
+		p.scored_on, p.notified_at, p.applied_at
 	 FROM postings p
 	 JOIN companies c ON c.id = p.company_id
 	 WHERE 1=1`
@@ -99,12 +100,11 @@ func (s *Store) ListPostings(f PostingFilter) ([]Posting, error) {
 		query += ` AND p.title_relevant = ?`
 		args = append(args, *f.TitleRelevant)
 	}
-	if f.Scored != nil {
-		if *f.Scored {
-			query += ` AND p.content_score IS NOT NULL`
-		} else {
-			query += ` AND p.content_score IS NULL`
-		}
+	if f.ScoredSince != nil {
+		query += ` AND (p.scored_on IS NULL OR p.scored_on >= ?)`
+		args = append(args, *f.ScoredSince)
+	} else if f.Unscored {
+		query += ` AND p.scored_on IS NULL`
 	}
 	if f.ContentScoreMin != nil {
 		query += ` AND p.content_score >= ?`
@@ -169,10 +169,18 @@ func (s *Store) SetTitleRelevance(postingID int64, relevant bool) error {
 	return err
 }
 
-func (s *Store) SetContentScore(postingID int64, score float64, reasoning string) error {
+func (s *Store) SetContentScore(postingID int64, score float64, reasoning string, clearNotified bool) error {
+	now := time.Now().UTC()
+	if clearNotified {
+		_, err := s.db.Exec(
+			`UPDATE postings SET content_score = ?, content_reasoning = ?, scored_on = ?, notified_at = NULL WHERE id = ?`,
+			score, reasoning, now, postingID,
+		)
+		return err
+	}
 	_, err := s.db.Exec(
-		`UPDATE postings SET content_score = ?, content_reasoning = ? WHERE id = ?`,
-		score, reasoning, postingID,
+		`UPDATE postings SET content_score = ?, content_reasoning = ?, scored_on = ? WHERE id = ?`,
+		score, reasoning, now, postingID,
 	)
 	return err
 }
@@ -209,7 +217,7 @@ func (s *Store) queryPostings(query string, args ...any) ([]Posting, error) {
 		if err := rows.Scan(
 			&p.ID, &p.CompanyID, &p.CompanyName, &p.ExternalID, &p.Title, &p.URL, &p.Location, &p.Description,
 			&p.FirstSeen, &p.LastSeen, &p.TitleRelevant, &p.ContentScore, &p.ContentReasoning,
-			&p.NotifiedAt, &p.AppliedAt,
+			&p.ScoredOn, &p.NotifiedAt, &p.AppliedAt,
 		); err != nil {
 			return nil, err
 		}
