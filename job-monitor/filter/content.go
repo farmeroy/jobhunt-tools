@@ -51,14 +51,15 @@ type scoreOutput struct {
 
 var scoreTool = anthropic.ToolParam{
 	Name:        "score_posting",
-	Description: param.Opt[string]{Value: "Score how well the candidate matches this role"},
+	Description: param.Opt[string]{Value: "Score how well the candidate matches this role. You MUST call this tool with your assessment."},
+	Strict:      param.Opt[bool]{Value: true},
 	InputSchema: anthropic.ToolInputSchemaParam{
+		ExtraFields: map[string]any{"additionalProperties": false},
 		Properties: map[string]any{
 			"score": map[string]any{
 				"type":        "integer",
+				"enum":        []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 				"description": "1-10 likelihood the candidate gets an interview. 9-10: meets all key requirements. 7-8: most requirements met, minor gaps. 4-6: mixed fit. 1-3: has a dealbreaker.",
-				"minimum":     1,
-				"maximum":     10,
 			},
 			"met": map[string]any{
 				"type":        "array",
@@ -73,7 +74,7 @@ var scoreTool = anthropic.ToolParam{
 			"dealbreakers": map[string]any{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
-				"description": "Hard blockers that should force score to 3 or below: location mismatch, experience gap >2 years below minimum, missing a skill the role lists as required.",
+				"description": "Hard blockers that should force score to 3 or below. ONLY these qualify: location mismatch, total experience gap >2 years below stated minimum, or missing a core technical skill that defines the role (e.g. embedded C role but candidate has only web experience). Domain knowledge gaps (e.g. no security experience for a frontend security role) are NOT dealbreakers — they belong in unmet.",
 			},
 		},
 		Required: []string{"score", "met", "unmet", "dealbreakers"},
@@ -161,7 +162,7 @@ func scorePosting(ctx context.Context, client *anthropic.Client, resumeText stri
 	}
 
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeHaiku5_5,
+		Model:     "claude-sonnet-5-5",
 		MaxTokens: 1024,
 		System: []anthropic.TextBlockParam{
 			{Text: fmt.Sprintf(`You are screening whether a candidate would realistically get an interview for this role.
@@ -195,9 +196,7 @@ Rules:
 			{OfTool: &scoreTool},
 		},
 		ToolChoice: anthropic.ToolChoiceUnionParam{
-			OfTool: &anthropic.ToolChoiceToolParam{
-				Name: "score_posting",
-			},
+			OfAuto: &anthropic.ToolChoiceAutoParam{},
 		},
 	})
 	if err != nil {
