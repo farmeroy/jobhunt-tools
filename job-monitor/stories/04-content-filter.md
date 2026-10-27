@@ -4,8 +4,8 @@
 
 ## Acceptance Criteria
 
-- [ ] Postings that pass the title filter have their full description fetched (if not already)
-- [x] Each description is scored against the user's CV and stated preferences using Haiku 4.5
+- [x] Postings that pass the title filter have their full description fetched (if not already)
+- [x] Each description is scored against the user's CV and stated preferences using Sonnet 5.5
 - [x] Returns a match score (e.g., 1-10) and brief reasoning
 - [x] Reasoning highlights key requirements met and unmet
 - [x] Score and reasoning are stored in the database

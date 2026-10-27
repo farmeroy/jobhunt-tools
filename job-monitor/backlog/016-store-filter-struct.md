@@ -12,11 +12,14 @@ Each pipeline stage added a new bespoke query method, duplicating the full 14-co
 
 A filter struct makes the store testable, composable, and prevents CLI commands from accidentally inheriting pipeline-specific WHERE clauses.
 
-## Tasks
+## Done
 
-- [ ] Define `PostingFilter` struct with optional fields: `TitleRelevant *bool`, `ContentScoreMin *float64`, `Notified *bool`, `Scored *bool`, `CompanyID *int64`, `DistinctTitles bool`
-- [ ] Implement `ListPostings(PostingFilter)` with dynamic WHERE clause building
-- [ ] Migrate all callers (run.go pipeline stages, postings.go CLI) to use `ListPostings`
-- [ ] Remove the old single-purpose methods
-- [ ] Apply same pattern to `ListActiveCompanies` / `ListAllCompanies` → `ListCompanies(activeOnly *bool)`
-- [ ] Fix `postings --min-score` to filter only by score, not notification status
+- [x] Define `PostingFilter` struct with optional fields: `TitleRelevant *bool`, `ContentScoreMin *float64`, `Notified *bool`, `Unscored bool`, `ScoredSince *time.Time`, `CompanyID *int64`
+- [x] Implement `ListPostings(PostingFilter)` with dynamic WHERE clause building
+- [x] Migrate all callers (run.go pipeline stages, postings.go CLI) to use `ListPostings`
+- [x] Apply same pattern to `ListActiveCompanies` / `ListAllCompanies` → `ListCompanies(CompanyFilter)`
+- [x] Fix `postings --min-score` to filter only by score, not notification status
+
+## Remaining
+
+- [ ] Remove `GetDistinctTitles` — still exists as a standalone method (`posting.go:131`), not yet folded into `ListPostings`

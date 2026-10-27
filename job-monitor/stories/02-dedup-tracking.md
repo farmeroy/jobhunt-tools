@@ -4,11 +4,11 @@
 
 ## Acceptance Criteria
 
-- [ ] SQLite database stores all fetched postings with a unique key (company + ATS job ID)
-- [ ] On each fetch cycle, only postings not already in the database are flagged as "new"
-- [ ] Previously seen postings are updated if their title or description changed
-- [ ] Postings that disappear from a company's board are marked as closed/removed (not deleted)
-- [ ] `first_seen` timestamp recorded for every posting
+- [x] SQLite database stores all fetched postings with a unique key (company + ATS job ID)
+- [x] On each fetch cycle, only postings not already in the database are flagged as "new"
+- [x] Previously seen postings are updated if their title or description changed
+- [x] Postings that disappear from a company's board are marked as closed/removed (not deleted)
+- [x] `first_seen` timestamp recorded for every posting
 
 ## Notes
 

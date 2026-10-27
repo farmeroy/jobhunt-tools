@@ -4,11 +4,11 @@
 
 ## Acceptance Criteria
 
-- [ ] `job-monitor import <csv>` seeds the companies table from an existing CSV (one-time migration)
-- [ ] `job-monitor add <company>` adds a company and auto-detects its ATS
-- [ ] `job-monitor remove <company>` marks a company as inactive (soft delete)
-- [ ] `job-monitor list` shows all active companies with their ATS status
-- [ ] New companies with unknown ATS can be auto-detected using existing `ats-detect` probing logic
+- [x] `job-monitor import <csv>` seeds the companies table from an existing CSV (one-time migration)
+- [x] `job-monitor add <company>` adds a company and auto-detects its ATS
+- [x] `job-monitor remove <company>` marks a company as inactive (soft delete)
+- [x] `job-monitor list` shows all active companies with their ATS status
+- [x] New companies with unknown ATS can be auto-detected using existing `ats-detect` probing logic
 
 ## Notes
 

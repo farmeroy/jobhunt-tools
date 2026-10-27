@@ -28,8 +28,9 @@ A CLI tool that monitors target companies for new job postings, filters them for
 |-----------|--------|-----------|
 | Language | Go | Existing Go tooling in repo (`ats-detect`), good for concurrent HTTP + scheduled work, building Go skills |
 | Storage | SQLite | Local, single-user, queryable, no external deps. Stores seen postings, filter results, logs |
-| LLM | Haiku 4.5 (Anthropic API) | ~$0.80/MTok input, fast, sufficient for title classification and description scoring |
-| Notification | Email digest | Reliable, works everywhere, includes links. Daily summary grouped by company |
+| LLM (title) | Haiku 4.5 (Anthropic API) | ~$0.80/MTok input, fast, sufficient for title classification |
+| LLM (content) | Sonnet 5.5 (Anthropic API) | Better quality for nuanced job description scoring |
+| Notification | Text file (temporary) → Email digest (planned) | Matches written to `matches.txt` grouped by company. Email notifications planned |
 | Scheduling | Cron (system) | Simple, standard. CLI also supports manual one-off runs |
 
 ## ATS Coverage
@@ -63,8 +64,10 @@ Need career page discovery. Could be manual curation or automated search.
 
 ### Pass 2: Content Filter
 - Runs only on jobs that pass the title filter
-- Scores job description against user's CV and stated preferences
-- Returns: match score, reasoning, key requirements met/unmet
+- Scores job description against user's CV and stated preferences using Sonnet 5.5
+- Returns: match score (1-10), structured `met`/`unmet`/`dealbreakers` arrays via tool_use
+- Reasoning stored as compact text format (`+ met | - unmet | ! dealbreaker`)
+- `scored_on` timestamp enables rescoring via `--reclassify` (same window as title reclassification)
 - One call per job posting (still cheap — only a fraction of total postings reach this stage)
 
 ## Schema Migrations
@@ -96,6 +99,7 @@ SQLite is the single source of truth for both companies and postings. The existi
 - `title_relevant` — boolean (pass 1 result, nullable)
 - `content_score` — float (pass 2 result, nullable)
 - `content_reasoning` — text (pass 2 reasoning, nullable)
+- `scored_on` — timestamp (nullable, when content was last scored)
 - `notified_at` — timestamp (nullable, when the user was notified)
 - `applied_at` — timestamp (nullable, when the user marked as applied)
 
@@ -139,9 +143,9 @@ job-monitor/
 ├── cmd/            # Cobra CLI commands (run, import, add, remove, list, postings)
 ├── fetcher/        # ATS-specific fetchers (greenhouse.go, ashby.go, lever.go) + keyword pre-filter
 ├── filter/         # LLM filtering logic (title + content passes)
-├── resume/         # Resume text extraction (PDF via pdfcpu, txt, md)
+├── resume/         # Resume text extraction (PDF via pdftotext, txt, md)
 ├── store/          # SQLite persistence layer
-└── notify/         # Notification (email first, extensible)
+└── notify/         # Match output (text file for now, email planned)
 ```
 
 ## Seed Data
